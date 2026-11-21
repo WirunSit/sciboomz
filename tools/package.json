@@ -13,6 +13,7 @@
     "playtest:online": "node playtest-online.mjs",
     "playtest:accounts": "node playtest-accounts.mjs",
     "playtest:feel": "node playtest-feel.mjs",
+    "playtest:maps": "node playtest-maps.mjs",
     "costumes": "node costumes.mjs"
   },
   "devDependencies": {

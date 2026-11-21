@@ -5,6 +5,7 @@ import {
   CLIMB,
   GAUGE_CORRECT_ANSWER,
   HEAL_AMOUNT,
+  MAP_STYLES,
   MAX_WIND,
   QUIZ_DUEL_BONUS,
   QuizDeck,
@@ -136,8 +137,8 @@ export class PvpRoom {
   /** New match: fresh map, full health, player 1 starts */
   start() {
     const seed = this.rng.int(0, 1e9);
-    this.terrain = Terrain.generate(seed);
-    const xs = [260 + this.rng.int(0, 120), WORLD_WIDTH - 260 - this.rng.int(0, 120)];
+    this.terrain = Terrain.generate(seed, MAP_STYLES[this.rng.int(0, MAP_STYLES.length - 1)]);
+    const xs = [this.terrain.standX(260 + this.rng.int(0, 120)), this.terrain.standX(WORLD_WIDTH - 260 - this.rng.int(0, 120))];
     this.seats.forEach((s, i) => {
       const x = xs[i];
       const y = this.terrain.groundBelow(x, 0) ?? 400;

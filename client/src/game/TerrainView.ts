@@ -37,7 +37,10 @@ export class TerrainView {
       let top = -1;
       for (let y = 0; y < h; y++) {
         const i = y * w + x;
-        if (!mask[i]) continue;
+        if (!mask[i]) {
+          top = -1; // a gap: the next solid stretch (e.g. a floating island) gets its own grass
+          continue;
+        }
         if (top < 0) top = y;
         const depth = y - top;
         // Cheap repeatable noise for speckles
@@ -97,7 +100,10 @@ export class TerrainView {
       let top = -1;
       for (let y = 0; y < h; y++) {
         const i = y * w + x;
-        if (!mask[i]) continue;
+        if (!mask[i]) {
+          top = -1; // a gap: the next solid stretch (e.g. a floating island) gets its own crust
+          continue;
+        }
         if (top < 0) top = y;
         const d = Math.floor((y - top) / SCALE);
         const band = Math.floor(T * TOP_BAND);

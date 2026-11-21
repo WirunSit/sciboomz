@@ -100,12 +100,13 @@ export class StageScene extends ArenaScene {
     this.lavaWave = undefined;
 
     const seed = Math.floor(Math.random() * 1e9);
-    const terrain = this.setupArena(seed, this.stage.background, this.stage.ground);
+    const terrain = this.setupArena(seed, this.stage.background, this.stage.ground, undefined, this.stage.map);
     const ground = (x: number) => terrain.groundBelow(x, 0) ?? WORLD_HEIGHT / 2;
 
     const save = loadSave();
-    const px = 260 + this.rng.int(0, 100);
-    const ex = WORLD_WIDTH - 300;
+    // Somewhere safe to stand (not on the edge of an island or a cliff)
+    const px = terrain.standX(260 + this.rng.int(0, 100));
+    const ex = terrain.standX(WORLD_WIDTH - 300);
     this.player = new Fighter(this, 'player', 'คุณ', px, ground(px), 1, { character: save.character, outfit: save.outfit }, weaponStats(equippedWeapon(save)), 0x3a8dde);
     // A copy: some bosses change size during the fight
     this.enemy = new Enemy(this, 'enemy', { ...this.stage.enemy }, ex, ground(ex));
@@ -242,7 +243,7 @@ export class StageScene extends ArenaScene {
     this.focusOn(this.enemy);
     this.hud.banner(`${this.enemy.name} แยกร่าง!`, '#ff8866');
     await this.wait(600);
-    const x = Phaser.Math.Clamp(this.enemy.x - 230, 700, WORLD_WIDTH - 200);
+    const x = this.terrain.standX(Phaser.Math.Clamp(this.enemy.x - 230, 700, WORLD_WIDTH - 200), 300);
     const extra = new Enemy(this, 'enemy2', { ...into }, x, this.terrain.groundBelow(x, 0) ?? WORLD_HEIGHT / 2);
     this.extras.push(extra);
     this.combatants.push(extra);

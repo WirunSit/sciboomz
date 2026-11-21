@@ -1,7 +1,7 @@
 // Run with: npm test -w shared
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { Terrain, simulateShot, blastDamage, WORLD_WIDTH } from './index';
+import { MAP_STYLES, Terrain, simulateShot, blastDamage, WORLD_WIDTH } from './index';
 
 test('same seed makes the same map', () => {
   const a = Terrain.generate(42);
@@ -16,6 +16,29 @@ test('the ground reaches both edges of the map (it fills the screen)', () => {
   assert.notEqual(t.groundBelow(0, 0), null);
   assert.notEqual(t.groundBelow(WORLD_WIDTH - 1, 0), null);
   assert.notEqual(t.groundBelow(WORLD_WIDTH / 2, 0), null);
+});
+
+test('map shapes: islands and canyons have sky to fall through; every shape is repeatable', () => {
+  for (const style of MAP_STYLES) {
+    for (let seed = 1; seed <= 20; seed++) {
+      const a = Terrain.generate(seed, style);
+      assert.deepEqual(a.mask, Terrain.generate(seed, style).mask, `${style} ${seed} repeats`);
+      // Both starting spots stand on solid, level-enough ground
+      for (const near of [310, WORLD_WIDTH - 310]) {
+        const x = a.standX(near);
+        const g = a.groundBelow(x, 0);
+        assert.notEqual(g, null, `${style} ${seed}: ground at the start near ${near}`);
+        assert.ok(Math.abs(x - near) <= 200, `${style} ${seed}: start stays near ${near}`);
+        for (const dx of [-30, 30]) assert.notEqual(a.groundBelow(x + dx, g! - 30), null, `${style} ${seed}: room to stand`);
+      }
+      const holes = Array.from({ length: WORLD_WIDTH / 10 }, (_, i) => a.groundBelow(i * 10, 0)).filter((g) => g === null).length;
+      if (style === 'hills') assert.equal(holes, 0, `hills ${seed} has no gaps`);
+      else assert.ok(holes > 10, `${style} ${seed} has gaps to fall through (${holes})`);
+    }
+  }
+  // Floating islands have sky under them too
+  const isl = Terrain.generate(5, 'islands');
+  assert.ok(isl.columnRuns(isl.standX(310)).every(([, bottom]) => bottom < 700), 'islands float');
 });
 
 test('carving removes ground', () => {

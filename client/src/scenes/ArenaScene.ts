@@ -41,6 +41,7 @@ import {
   windFactor,
   type Hit,
   type InstantSkill,
+  type MapStyle,
   type ShotMode,
   type SkillBlocker,
   type ShotTimeline,
@@ -231,7 +232,7 @@ export abstract class ArenaScene extends Phaser.Scene {
   // ---- Setup ----------------------------------------------------------------
 
   /** Build background, ground and camera. Call first in create(). Online games pass the server's map. */
-  protected setupArena(seed: number, backgroundKey: string, groundKey: string, map?: Terrain): Terrain {
+  protected setupArena(seed: number, backgroundKey: string, groundKey: string, map?: Terrain, style: MapStyle = 'hills'): Terrain {
     // The same Scene object is reused on restart, so reset everything
     this.combatants = [];
     this.phase = 'idle';
@@ -250,7 +251,7 @@ export abstract class ArenaScene extends Phaser.Scene {
     this.events.once('shutdown', () => this.matchToken++);
 
     drawArtBackground(this, backgroundKey, WORLD_WIDTH);
-    const terrain = map ?? Terrain.generate(seed);
+    const terrain = map ?? Terrain.generate(seed, style);
     this.terrainView = new TerrainView(this, terrain, groundKey);
 
     this.skyMarker = this.add

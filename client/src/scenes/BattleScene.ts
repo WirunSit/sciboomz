@@ -1,4 +1,4 @@
-import { WORLD_HEIGHT, WORLD_WIDTH, baseWeaponStats } from '@sciboom/shared';
+import { MAP_STYLES, MAP_STYLE_NAMES, WORLD_HEIGHT, WORLD_WIDTH, baseWeaponStats } from '@sciboom/shared';
 import type { Combatant } from '../game/Combatant';
 import { Fighter, plainLook } from '../game/Fighter';
 import { loadSave } from '../save';
@@ -13,11 +13,12 @@ export class BattleScene extends ArenaScene {
 
   create() {
     const seed = Math.floor(Math.random() * 1e9);
-    const terrain = this.setupArena(seed, 'backgrounds/pvp_arena', 'terrain/arena_candy');
+    const style = MAP_STYLES[seed % MAP_STYLES.length];
+    const terrain = this.setupArena(seed, 'backgrounds/pvp_arena', 'terrain/arena_candy', undefined, style);
 
     const spawn = (x: number) => terrain.groundBelow(x, 0) ?? WORLD_HEIGHT / 2;
-    const x1 = 260 + this.rng.int(0, 120);
-    const x2 = WORLD_WIDTH - 260 - this.rng.int(0, 120);
+    const x1 = terrain.standX(260 + this.rng.int(0, 120));
+    const x2 = terrain.standX(WORLD_WIDTH - 260 - this.rng.int(0, 120));
     // PvP is fair: everyone gets the base stats, whatever they've upgraded.
     // Looks are only cosmetic: player 1 wears this device's outfit, player 2 the other character in school uniform.
     const save = loadSave();
@@ -29,7 +30,8 @@ export class BattleScene extends ArenaScene {
     this.setupHud();
     // Same skills for both players; specials are open to everyone so it stays fair
     for (const c of this.combatants) this.enableSkills(c as Fighter, true);
-    this.runMatch();
+    this.hud.banner(`แผนที่${MAP_STYLE_NAMES[style]}`);
+    this.time.delayedCall(1300, () => this.runMatch());
   }
 
   protected musicTrack(): Track {

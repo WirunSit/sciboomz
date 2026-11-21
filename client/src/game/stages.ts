@@ -1,4 +1,4 @@
-import { ENEMY_WEAPONS, WEAPON_CATALOG, type DropTable, type WeaponStats } from '@sciboom/shared';
+import { ENEMY_WEAPONS, WEAPON_CATALOG, type DropTable, type MapStyle, type WeaponStats } from '@sciboom/shared';
 import type { EnemyConfig } from './Enemy';
 
 /**
@@ -19,6 +19,8 @@ export interface StageConfig {
   title: string;
   background: string;
   ground: string;
+  /** Shape of the map */
+  map: MapStyle;
   enemy: EnemyConfig;
   /** Every Nth enemy turn the enemy charges an ultimate and a question appears (0 = never) */
   ultimateEvery: number;
@@ -42,14 +44,16 @@ export interface WorldConfig {
   boss: string;
   background: string;
   ground: string;
+  /** Shape of this world's maps: hills to start, then islands (cells floating in water / clouds) and a volcanic canyon */
+  map: MapStyle;
 }
 
 export const WORLDS: WorldConfig[] = [
-  { id: 1, title: 'โลก 1', unitTitle: 'สารบริสุทธิ์', boss: 'bosses/mixtron', background: 'backgrounds/world1_lab', ground: 'terrain/lab_stone' },
-  { id: 2, title: 'โลก 2', unitTitle: 'หน่วยพื้นฐานของสิ่งมีชีวิต', boss: 'bosses/amoebox', background: 'backgrounds/world2_cell', ground: 'terrain/cell_tissue' },
-  { id: 3, title: 'โลก 3', unitTitle: 'การดำรงชีวิตของพืช', boss: 'bosses/venomroot', background: 'backgrounds/world3_forest', ground: 'terrain/soil_roots' },
-  { id: 4, title: 'โลก 4', unitTitle: 'พลังงานความร้อน', boss: 'bosses/magmadon', background: 'backgrounds/world4_volcano', ground: 'terrain/lava_rock' },
-  { id: 5, title: 'โลก 5', unitTitle: 'ลมฟ้าอากาศ', boss: 'bosses/stormlord', background: 'backgrounds/world5_sky', ground: 'terrain/cloud' },
+  { id: 1, title: 'โลก 1', unitTitle: 'สารบริสุทธิ์', boss: 'bosses/mixtron', background: 'backgrounds/world1_lab', ground: 'terrain/lab_stone', map: 'hills' },
+  { id: 2, title: 'โลก 2', unitTitle: 'หน่วยพื้นฐานของสิ่งมีชีวิต', boss: 'bosses/amoebox', background: 'backgrounds/world2_cell', ground: 'terrain/cell_tissue', map: 'islands' },
+  { id: 3, title: 'โลก 3', unitTitle: 'การดำรงชีวิตของพืช', boss: 'bosses/venomroot', background: 'backgrounds/world3_forest', ground: 'terrain/soil_roots', map: 'hills' },
+  { id: 4, title: 'โลก 4', unitTitle: 'พลังงานความร้อน', boss: 'bosses/magmadon', background: 'backgrounds/world4_volcano', ground: 'terrain/lava_rock', map: 'canyon' },
+  { id: 5, title: 'โลก 5', unitTitle: 'ลมฟ้าอากาศ', boss: 'bosses/stormlord', background: 'backgrounds/world5_sky', ground: 'terrain/cloud', map: 'islands' },
 ];
 
 /** A body on the battlefield: size sets the hit circle and where shots come out */
@@ -147,7 +151,7 @@ function worldStages(p: WorldPlan): StageConfig[] {
   const weapons = WEAPON_CATALOG.filter((x) => x.world === p.world).map((x) => x.id);
   // A little sharper aim in later worlds
   const sharp = 0.03 * (p.world - 1);
-  const common = { world: p.world, unit: p.world, background: w.background, ground: w.ground, crates: 3 };
+  const common = { world: p.world, unit: p.world, background: w.background, ground: w.ground, map: w.map, crates: 3 };
   const late = p.world >= 4;
   return [
     {

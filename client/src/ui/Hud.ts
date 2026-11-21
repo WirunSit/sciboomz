@@ -197,9 +197,10 @@ export class Hud {
     g.fillStyle(0x7fd36a, 0.9);
     const sy = MINIMAP.h / terrain.height;
     for (let x = 0; x < terrain.width; x += 8) {
-      const top = terrain.groundBelow(x, 0);
-      if (top === null) continue;
-      g.fillRect(MINIMAP.x + x * this.mapScale, MINIMAP.y + top * sy, Math.max(1, 8 * this.mapScale), (terrain.height - top) * sy);
+      // Every solid stretch of the column (floating islands have sky below them)
+      for (const [top, bottom] of terrain.columnRuns(x)) {
+        g.fillRect(MINIMAP.x + x * this.mapScale, MINIMAP.y + top * sy, Math.max(1, 8 * this.mapScale), Math.max(1, (bottom + 1 - top) * sy));
+      }
     }
   }
 
