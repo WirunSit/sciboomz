@@ -59,7 +59,7 @@ import type { Fighter } from '../game/Fighter';
 import { TerrainView } from '../game/TerrainView';
 import { Trail, blastStyle, debris, weaponBlast } from '../game/effects';
 import { Controls } from '../ui/Controls';
-import { Hud } from '../ui/Hud';
+import { Hud, type HudOptions } from '../ui/Hud';
 import { SkillBar, type SlotState } from '../ui/SkillBar';
 import { addSettingsButton } from '../ui/SettingsPanel';
 import { addSoundToggle } from '../ui/SoundToggle';
@@ -271,9 +271,9 @@ export abstract class ArenaScene extends Phaser.Scene {
   }
 
   /** HUD + controls. Call after this.combatants holds the two sides (left, right). */
-  protected setupHud(menuScene = 'Menu') {
-    // The HUD shows the two sides that exist now; extra enemies later don't get a panel
-    this.hud = new Hud(this, [...this.combatants], WORLD_WIDTH);
+  protected setupHud(menuScene = 'Menu', hudOpts: HudOptions = {}) {
+    // The HUD shows everyone on the field now; extra enemies later (a boss splitting) don't get a panel
+    this.hud = new Hud(this, [...this.combatants], WORLD_WIDTH, hudOpts);
     // A camouflaged fighter is not on the other side's mini-map either
     this.hud.showOnMap = (c) => !c.hidden || this.viewerOwns(c);
     this.hud.drawMinimap(this.terrain);
@@ -815,7 +815,10 @@ export abstract class ArenaScene extends Phaser.Scene {
     this.hud.drawMinimap(this.terrain);
 
     const shooter = pb.shooter;
-    const enemiesHit = hits.filter((h) => h.id !== shooter.id && h.damage > 0 && this.byId(h.id)?.alive);
+    const enemiesHit = hits.filter((h) => {
+      const c = this.byId(h.id);
+      return !!c && c.alive && h.damage > 0 && this.isFoe(shooter, c);
+    });
     let knockedOut: Combatant | null = null;
     for (const h of hits) {
       const c = this.byId(h.id);
@@ -936,10 +939,15 @@ export abstract class ArenaScene extends Phaser.Scene {
     this.syncShield(c);
   }
 
+  /** On opposite sides (teammates are not foes) */
+  protected isFoe(a: Combatant, b: Combatant): boolean {
+    return a !== b;
+  }
+
   /** Someone fell off the map: whoever's turn it was gets the credit */
   protected onFellOff(c: Combatant) {
     const by = this.turnActor;
-    if (by && by !== c) this.giveAward(by, 'fall', `ส่ง ${c.name} ลงเหว!`, '#ffb0a0');
+    if (by && this.isFoe(by, c)) this.giveAward(by, 'fall', `ส่ง ${c.name} ลงเหว!`, '#ffb0a0');
   }
 
   /** Hook: a hit is shown on screen */

@@ -1,21 +1,32 @@
-// One PvP match between two players. The server owns the truth: the map,
-// positions, health, wind, skills and every shot (worked out with the same
-// shared rules the game uses), so nobody can cheat by changing their game.
+// One online match: 1 v 1, 2 v 2 teams, or classmates together against a
+// co-op boss. The server owns the truth: the map, positions, health, wind,
+// skills, whose turn it is and every shot (worked out with the same shared
+// rules the game uses), so nobody can cheat by changing their game.
 import {
   CLIMB,
+  COOP_INTERRUPT_SHARE,
+  COOP_ULTIMATE_EVERY,
+  DELAY_TURN,
+  EMOTES,
+  EMOTE_COOLDOWN_MS,
   GAUGE_CORRECT_ANSWER,
   HEAL_AMOUNT,
   MAP_STYLES,
   MAX_WIND,
+  MODE_SEATS,
   QUIZ_DUEL_BONUS,
   QuizDeck,
   Rng,
+  STAMINA_MAX,
   TURN_SECONDS,
   Terrain,
   SHIELD_FACTOR,
   WALK_PX_PER_STAMINA,
   WORLD_WIDTH,
   addGauge,
+  bossBody,
+  coopBoss,
+  coopBossHp,
   fireSkills,
   baseWeaponStats,
   fighterMuzzle,
@@ -24,24 +35,36 @@ import {
   isSkillSlot,
   newFighterUnit,
   newSkillState,
+  nextActor,
+  nextEnemySkill,
   pickSkill,
+  planShot,
   resolveShot,
   sanitizeOutfit,
   skillBlocker,
   startSkillTurn,
+  teamForSeat,
   tickBurn,
+  turnDelay,
+  turnPreview,
   weaponDef,
   weaponSpecial,
   windFactor,
+  type BossInfo,
   type ClientMessage,
+  type CoopBoss,
+  type DelayEntry,
   type PlayerInfo,
   type Question,
   type QuizItem,
+  type RoomMode,
+  type RoomSummary,
   type ServerMessage,
   type ShotTimeline,
   type SkillSlot,
   type SkillState,
   type Unit,
+  type WeaponStats,
 } from '@sciboom/shared';
 
 type Hello = Extract<ClientMessage, { t: 'hello' }>;
@@ -57,6 +80,8 @@ export interface RoomOptions {
   /** Speed up the pauses while clients animate (tests) */
   animationScale?: number;
   seed?: number;
+  /** Co-op: which boss (default: picked at random) */
+  bossId?: string;
 }
 
 interface Seat {
@@ -68,6 +93,22 @@ interface Seat {
   shield: boolean;
   angle: number;
   wantsRematch: boolean;
+  /** Turn order: least delay goes next */
+  delay: number;
+  /** Left the match (their fighter stays on the map, knocked out) */
+  gone: boolean;
+  /** Co-op: the boss's question was answered right, next shot is stronger */
+  bonus: number;
+  lastEmote: number;
+}
+
+interface Boss {
+  def: CoopBoss;
+  unit: Unit;
+  facing: 1 | -1;
+  skill: number;
+  turns: number;
+  delay: number;
 }
 
 type Phase = 'waiting' | 'quiz' | 'aiming' | 'resolving' | 'over';
@@ -75,6 +116,9 @@ type Phase = 'waiting' | 'quiz' | 'aiming' | 'resolving' | 'over';
 const QUIZ_SECONDS = 20;
 /** Steps per second of the shot simulation (shared physics STEP = 1/60) */
 const STEPS_PER_SECOND = 60;
+const BOSS_ID = 'boss';
+/** Co-op: a right answer to the boss's question makes your next shot this much stronger */
+const COOP_ANSWER_BONUS = 1.3;
 
 export class PvpRoom {
   readonly seats: Seat[] = [];
@@ -82,11 +126,14 @@ export class PvpRoom {
   private terrain!: Terrain;
   private rng: Rng;
   private deck: QuizDeck;
-  private turnIndex = 0;
+  private boss: Boss | null = null;
+  private actorId = '';
   private wind = 0;
   private damageMul = 1;
   private walkFromX = 0;
   private quizItem: QuizItem | null = null;
+  /** Co-op boss question: who has answered, and how */
+  private bossAnswers = new Map<string, boolean>();
   private timer: ReturnType<typeof setTimeout> | null = null;
   private readonly turnSeconds: number;
   private readonly quizSeconds: number;
@@ -97,6 +144,7 @@ export class PvpRoom {
     readonly code: string,
     readonly quizDuel: boolean,
     private readonly opts: RoomOptions,
+    readonly mode: RoomMode = 'duel',
   ) {
     this.rng = new Rng(opts.seed ?? Math.floor(Math.random() * 1e9));
     this.deck = new QuizDeck(opts.questions, this.rng, 2);
@@ -106,8 +154,17 @@ export class PvpRoom {
     this.animationScale = opts.animationScale ?? 1;
   }
 
+  get maxSeats(): number {
+    return MODE_SEATS[this.mode];
+  }
+
   get full(): boolean {
-    return this.seats.length >= 2;
+    return this.seats.length >= this.maxSeats;
+  }
+
+  /** The player who made the room (can start a co-op raid early) */
+  get host(): Seat | undefined {
+    return this.seats[0];
   }
 
   addPlayer(id: string, hello: Hello) {
@@ -125,20 +182,47 @@ export class PvpRoom {
         x: 0,
         y: 0,
         facing: 1,
+        team: teamForSeat(this.mode, this.seats.length),
       },
       unit: newFighterUnit(id, 0, 0),
       skills: newSkillState(true),
       shield: false,
       angle: 45,
       wantsRematch: false,
+      delay: 0,
+      gone: false,
+      bonus: 1,
+      lastEmote: 0,
+    });
+    this.sendWaiting();
+  }
+
+  /** For the lobby's list of rooms to join */
+  summary(): RoomSummary {
+    return { code: this.code, host: this.host?.info.name ?? '', mode: this.mode, players: this.seats.length, seats: this.maxSeats, quizDuel: this.quizDuel };
+  }
+
+  /** Tell everyone in the waiting room who's here */
+  private sendWaiting() {
+    if (this.phase !== 'waiting') return;
+    this.broadcast({
+      t: 'room',
+      code: this.code,
+      mode: this.mode,
+      quizDuel: this.quizDuel,
+      host: this.host?.id ?? '',
+      players: this.seats.map((s) => ({ id: s.id, name: s.info.name, team: s.info.team })),
+      seats: this.maxSeats,
     });
   }
 
-  /** New match: fresh map, full health, player 1 starts */
+  /** New match: fresh map, full health */
   start() {
     const seed = this.rng.int(0, 1e9);
     this.terrain = Terrain.generate(seed, MAP_STYLES[this.rng.int(0, MAP_STYLES.length - 1)]);
-    const xs = [this.terrain.standX(260 + this.rng.int(0, 120)), this.terrain.standX(WORLD_WIDTH - 260 - this.rng.int(0, 120))];
+    // Drop anyone who left after the last match
+    for (let i = this.seats.length - 1; i >= 0; i--) if (this.seats[i].gone) this.seats.splice(i, 1);
+    const xs = this.spawnXs();
     this.seats.forEach((s, i) => {
       const x = xs[i];
       const y = this.terrain.groundBelow(x, 0) ?? 400;
@@ -147,28 +231,80 @@ export class PvpRoom {
       s.shield = false;
       s.angle = 45;
       s.wantsRematch = false;
-      s.info = { ...s.info, x, y, facing: i === 0 ? 1 : -1 };
+      s.delay = i; // everyone once, in join order, to begin with
+      s.bonus = 1;
+      s.info = { ...s.info, x, y, facing: x < WORLD_WIDTH / 2 ? 1 : -1, team: this.mode === 'coop' ? 0 : s.info.team };
     });
-    this.turnIndex = 0;
+    this.boss = this.mode === 'coop' ? this.makeBoss() : null;
     const map = this.terrain.encode();
+    const players = this.seats.map((o) => o.info);
+    const boss: BossInfo | null = this.boss && {
+      id: BOSS_ID,
+      bossId: this.boss.def.id,
+      name: this.boss.def.name,
+      texture: this.boss.def.texture,
+      height: this.boss.def.height,
+      hp: this.boss.unit.maxHp,
+      x: this.boss.unit.x,
+      y: this.boss.unit.y,
+    };
     for (const s of this.seats) {
-      this.opts.send(s.id, { t: 'start', you: s.id, code: this.code, seed, map, players: this.seats.map((o) => o.info), quizDuel: this.quizDuel });
+      this.opts.send(s.id, { t: 'start', you: s.id, code: this.code, seed, map, players, quizDuel: this.quizDuel, mode: this.mode, boss });
     }
     this.beginTurn();
   }
 
+  /** Where everyone starts: the two sides at either end; co-op players together on the left */
+  private spawnXs(): number[] {
+    const n = this.seats.length;
+    const t = this.terrain;
+    const jitter = () => this.rng.int(0, 100);
+    if (this.mode === 'coop') return this.seats.map((_, i) => t.standX(200 + i * 170 + jitter() / 2, 120));
+    if (this.mode === 'team') {
+      const left = [200, 470];
+      const right = [WORLD_WIDTH - 200, WORLD_WIDTH - 470];
+      const used = [0, 0];
+      return this.seats.map((s) => {
+        const side = s.info.team;
+        const x = (side === 0 ? left : right)[used[side]++ % 2];
+        return t.standX(x + (side === 0 ? jitter() : -jitter()), 120);
+      });
+    }
+    return [t.standX(260 + jitter()), t.standX(WORLD_WIDTH - 260 - jitter())].slice(0, Math.max(2, n));
+  }
+
+  private makeBoss(): Boss {
+    const def = coopBoss(this.opts.bossId ?? ['mixtron', 'amoebox', 'venomroot', 'magmadon', 'stormlord'][this.rng.int(0, 4)]);
+    const body = bossBody(def.height);
+    const x = this.terrain.standX(WORLD_WIDTH - 300, 250);
+    const y = this.terrain.groundBelow(x, 0) ?? 400;
+    const hp = coopBossHp(def, this.seats.length);
+    // Questions from the boss's world
+    const unitQuestions = this.opts.questions.filter((q) => q.id.startsWith(`u${def.unit}-`));
+    if (unitQuestions.length > 0) this.deck = new QuizDeck(unitQuestions, this.rng, 3);
+    return {
+      def,
+      unit: { id: BOSS_ID, x, y, hp, maxHp: hp, alive: true, radius: body.radius, offsetY: body.offsetY, burn: 0 },
+      facing: -1,
+      skill: def.skill,
+      turns: 0,
+      delay: this.seats.length, // after every player's first turn
+    };
+  }
+
   handle(id: string, msg: ClientMessage) {
     const seat = this.seats.find((s) => s.id === id);
-    if (!seat) return;
-    const isActor = this.actor === seat;
+    if (!seat || seat.gone) return;
+    const isActor = this.actorId === seat.id;
     switch (msg.t) {
       case 'answer':
-        if (this.phase === 'quiz' && isActor) this.answer(seat, msg.chosen);
+        if (this.phase === 'quiz' && this.boss && this.bossAnswers.has(seat.id) === false && this.actorId === BOSS_ID) this.bossAnswer(seat, msg.chosen);
+        else if (this.phase === 'quiz' && isActor) this.answer(seat, msg.chosen);
         break;
       case 'move':
         if (this.phase === 'aiming' && isActor) {
           this.place(seat, msg.x, msg.y, msg.facing, msg.angle);
-          this.sendOther(seat, { t: 'moved', id, x: seat.unit.x, y: seat.unit.y, facing: seat.info.facing, angle: seat.angle });
+          this.sendOthers(seat, { t: 'moved', id, x: seat.unit.x, y: seat.unit.y, facing: seat.info.facing, angle: seat.angle });
         }
         break;
       case 'skill':
@@ -183,24 +319,68 @@ export class PvpRoom {
       case 'pass':
         if ((this.phase === 'aiming' || this.phase === 'quiz') && isActor) this.skip();
         break;
+      case 'emote': {
+        const n = Math.floor(Number(msg.id));
+        const now = Date.now();
+        if (this.phase === 'waiting' || n < 0 || n >= EMOTES.length || now - seat.lastEmote < EMOTE_COOLDOWN_MS) break;
+        seat.lastEmote = now;
+        this.broadcast({ t: 'emote', id: seat.id, emote: n });
+        break;
+      }
       case 'rematch':
-        if (this.phase !== 'over') break;
+        if (this.phase !== 'over' || this.seats.some((s) => s.gone)) break;
         seat.wantsRematch = true;
-        this.sendOther(seat, { t: 'rematchWanted', id });
-        if (this.full && this.seats.every((s) => s.wantsRematch)) this.start();
+        this.sendOthers(seat, { t: 'rematchWanted', id });
+        if (this.seats.length >= this.minPlayers && this.seats.every((s) => s.wantsRematch)) this.start();
         break;
     }
   }
 
-  /** A player left or lost their connection: the other one wins */
+  /** Fewest players for a match of this mode */
+  get minPlayers(): number {
+    return this.mode === 'coop' ? 1 : this.maxSeats;
+  }
+
+  /** A player left or lost their connection */
   removePlayer(id: string) {
     const idx = this.seats.findIndex((s) => s.id === id);
     if (idx < 0) return;
-    const wasPlaying = this.phase !== 'waiting' && this.phase !== 'over';
-    this.seats.splice(idx, 1);
-    this.clearTimer();
-    if (wasPlaying && this.seats.length === 1) this.finish(this.seats[0].id, 'left');
-    else if (this.phase === 'over') for (const s of this.seats) this.opts.send(s.id, { t: 'over', winner: s.id, reason: 'left' });
+    const seat = this.seats[idx];
+    if (this.phase === 'waiting') {
+      this.seats.splice(idx, 1);
+      // Teams are by join order: everyone keeps a fair split
+      this.seats.forEach((s, i) => (s.info.team = teamForSeat(this.mode, i)));
+      this.sendWaiting();
+      return;
+    }
+    if (this.phase === 'over') {
+      this.seats.splice(idx, 1);
+      for (const s of this.seats) this.opts.send(s.id, { t: 'over', winner: s.id, reason: 'left', team: null });
+      return;
+    }
+    // Mid-match: their fighter is out; the match goes on while both sides still have someone
+    seat.gone = true;
+    seat.unit.alive = false;
+    seat.unit.hp = 0;
+    this.broadcast({ t: 'skipped', id: seat.id, gone: true });
+    const present = this.seats.filter((s) => !s.gone);
+    if (present.length === 0) {
+      this.clearTimer();
+      this.phase = 'over';
+      return;
+    }
+    const sides = new Set(present.map((s) => s.info.team));
+    if (this.mode !== 'coop' && sides.size < 2) {
+      this.finish(present[0].info.team, 'left');
+      return;
+    }
+    if (this.actorId === seat.id) {
+      this.clearTimer();
+      this.phase = 'resolving';
+      this.later(800, () => this.endTurn());
+    } else if (this.phase === 'quiz' && this.actorId === BOSS_ID && this.bossAnswers.size >= this.livePlayers().length) {
+      this.resolveBossQuiz();
+    }
   }
 
   dispose() {
@@ -209,30 +389,46 @@ export class PvpRoom {
 
   // ---- Turns ---------------------------------------------------------------------
 
-  private get actor(): Seat | undefined {
-    return this.seats[this.turnIndex % this.seats.length];
+  private delayEntries(): DelayEntry[] {
+    const list: DelayEntry[] = this.seats.map((s) => ({ id: s.id, delay: s.delay, alive: s.unit.alive && !s.gone }));
+    if (this.boss) list.push({ id: BOSS_ID, delay: this.boss.delay, alive: this.boss.unit.alive });
+    return list;
   }
 
-  private other(seat: Seat): Seat | undefined {
-    return this.seats.find((s) => s !== seat);
+  private livePlayers(): Seat[] {
+    return this.seats.filter((s) => s.unit.alive && !s.gone);
   }
 
   private beginTurn() {
-    const actor = this.actor;
-    if (!actor) return;
-    // Wind for the least experienced player, so both face the same weather
+    const next = nextActor(this.delayEntries());
+    if (!next) return;
+    this.actorId = next.id;
+    // Wind for the least experienced player, so everyone faces the same weather
     const level = Math.min(...this.seats.map((s) => s.info.level));
     this.wind = Math.round(this.rng.range(-MAX_WIND, MAX_WIND) * windFactor(level));
     this.damageMul = 1;
+    // The order after this turn (as if it's a plain one)
+    const after = this.delayEntries().map((e) => (e.id === next.id ? { ...e, delay: e.delay + DELAY_TURN } : e));
+    const order = turnPreview(after, 5);
+    const hp = Object.fromEntries([...this.seats.map((s) => [s.id, s.unit.hp]), ...(this.boss ? [[BOSS_ID, this.boss.unit.hp]] : [])]);
+
+    if (next.id === BOSS_ID) {
+      for (const s of this.seats) this.opts.send(s.id, { t: 'turn', actor: BOSS_ID, wind: this.wind, seconds: 0, burn: 0, hp, skills: s.skills, order });
+      this.phase = 'resolving';
+      this.later(1200, () => this.bossTurn());
+      return;
+    }
+
+    const actor = this.seats.find((s) => s.id === next.id)!;
     this.walkFromX = actor.unit.x;
     startSkillTurn(actor.skills);
     actor.shield = false;
     const burn = tickBurn(actor.unit);
-    const hp = Object.fromEntries(this.seats.map((s) => [s.id, s.unit.hp]));
     for (const s of this.seats) {
-      this.opts.send(s.id, { t: 'turn', actor: actor.id, wind: this.wind, seconds: this.turnSeconds, burn, hp, skills: s.skills });
+      this.opts.send(s.id, { t: 'turn', actor: actor.id, wind: this.wind, seconds: this.turnSeconds, burn, hp: { ...hp, [actor.id]: actor.unit.hp }, skills: s.skills, order });
     }
     if (!actor.unit.alive) {
+      actor.delay += DELAY_TURN;
       this.later(1500, () => this.endTurn());
       return;
     }
@@ -244,6 +440,10 @@ export class PvpRoom {
     } else {
       this.startAiming();
     }
+  }
+
+  private get actorSeat(): Seat | undefined {
+    return this.seats.find((s) => s.id === this.actorId);
   }
 
   private answer(seat: Seat, chosen: number) {
@@ -264,9 +464,10 @@ export class PvpRoom {
   }
 
   private skip() {
-    const actor = this.actor;
+    const actor = this.actorSeat;
     this.clearTimer();
     if (!actor) return;
+    actor.delay += DELAY_TURN;
     this.phase = 'resolving';
     this.broadcast({ t: 'skipped', id: actor.id });
     this.later(800, () => this.endTurn());
@@ -305,6 +506,13 @@ export class PvpRoom {
     for (const s of this.seats) this.opts.send(s.id, { t: 'skillUsed', id: seat.id, slot, hp: seat.unit.hp, skills: s.skills });
   }
 
+  /** Everyone on the field, as the rules see them */
+  private allUnits(): Unit[] {
+    return [...this.seats.map((s) => s.unit), ...(this.boss ? [this.boss.unit] : [])];
+  }
+
+  private shieldDamage = (id: string, dmg: number) => (this.seats.find((o) => o.id === id)?.shield ? Math.round(dmg * SHIELD_FACTOR) : dmg);
+
   private fire(seat: Seat, power: number, wanted: SkillSlot[]) {
     this.clearTimer();
     this.phase = 'resolving';
@@ -316,13 +524,18 @@ export class PvpRoom {
     seat.skills.armed = budget.armed;
     seat.skills.stamina = Math.max(0, budget.stamina);
     const loadout = fireSkills(seat.skills);
+    // A plain 1 v 1 just alternates; with more players, big turns wait longer for the next one
+    seat.delay += this.mode === 'duel' ? DELAY_TURN : turnDelay(STAMINA_MAX - seat.skills.stamina, loadout.mode === 'ultimate');
 
     const weapon = baseWeaponStats(seat.info.weaponId);
     const mode = loadout.mode;
-    const units = this.seats.map((s) => s.unit);
+    const units = this.allUnits();
+    const foes = () => units.filter((u) => u !== seat.unit && u.alive && this.teamOf(u.id) !== seat.info.team);
     const timelines: ShotTimeline[] = [];
+    const bonus = seat.bonus;
+    seat.bonus = 1;
     for (let k = 0; k < loadout.rounds; k++) {
-      if (k > 0 && !units.some((u) => u !== seat.unit && u.alive)) break;
+      if (k > 0 && foes().length === 0) break;
       if (!seat.unit.alive) break;
       const m = fighterMuzzle(seat.unit.x, seat.unit.y, seat.info.facing, seat.angle);
       const result = resolveShot(this.terrain, units, {
@@ -332,10 +545,8 @@ export class PvpRoom {
         special: mode === 'special' ? weaponSpecial(weapon.id).kind : null,
         damage: weapon.damage,
         radius: weapon.radius,
-        damageMul: loadout.damageMul * this.damageMul,
-      }, {
-        modifyDamage: (id, dmg) => (this.seats.find((o) => o.id === id)?.shield ? Math.round(dmg * SHIELD_FACTOR) : dmg),
-      });
+        damageMul: loadout.damageMul * this.damageMul * bonus,
+      }, { modifyDamage: this.shieldDamage });
       this.terrain = result.terrain;
       timelines.push(compact(result));
     }
@@ -343,53 +554,145 @@ export class PvpRoom {
       const s = this.seats.find((o) => o.id === id);
       if (s) addGauge(s.skills, n);
     }
+    this.sendShot(seat.id, seat.unit, seat.info.facing, seat.angle, armed, timelines);
+  }
 
-    const unitsOut = this.seats.map((s) => ({ id: s.id, x: s.unit.x, y: s.unit.y, hp: s.unit.hp, alive: s.unit.alive }));
+  private teamOf(id: string): 0 | 1 {
+    if (id === BOSS_ID) return 1;
+    return this.seats.find((s) => s.id === id)?.info.team ?? 0;
+  }
+
+  /** Tell everyone about a shot, then wait while their games show it */
+  private sendShot(id: string, from: Unit, facing: 1 | -1, angle: number, armed: SkillSlot[], timelines: ShotTimeline[], projectile?: string) {
+    const unitsOut = this.allUnits().map((u) => ({ id: u.id, x: u.x, y: u.y, hp: u.hp, alive: u.alive }));
     for (const s of this.seats) {
-      this.opts.send(s.id, {
-        t: 'shot',
-        id: seat.id,
-        x: seat.unit.x,
-        y: seat.unit.y,
-        facing: seat.info.facing,
-        angle: seat.angle,
-        armed,
-        timelines,
-        units: unitsOut,
-        skills: s.skills,
-      });
+      this.opts.send(s.id, { t: 'shot', id, x: from.x, y: from.y, facing, angle, armed, timelines, units: unitsOut, skills: s.skills, projectile });
     }
-    // Give both games time to show the shot before the next turn's clock starts
     const steps = timelines.reduce((a, tl) => a + tl.end, 0);
     const ms = (steps / STEPS_PER_SECOND) * 1000 + 1500 + (timelines.length - 1) * 900;
     this.later(ms, () => this.endTurn());
   }
 
-  private endTurn() {
-    const alive = this.seats.filter((s) => s.unit.alive);
-    if (alive.length <= 1) {
-      this.finish(alive[0]?.id ?? null, 'win');
+  // ---- Co-op boss ----------------------------------------------------------------------
+
+  private bossTurn() {
+    const boss = this.boss!;
+    boss.turns++;
+    boss.delay += DELAY_TURN;
+    if (boss.turns % COOP_ULTIMATE_EVERY === 0) {
+      // The boss charges its ultimate: everyone gets the same question; enough right answers stop it
+      this.phase = 'quiz';
+      this.bossAnswers = new Map();
+      this.quizItem = this.deck.next();
+      const title = `${boss.def.name} กำลังชาร์จ "${boss.def.ultimate.name}"! ตอบถูกพร้อมกันครึ่งห้องเพื่อขัดท่า`;
+      for (const s of this.livePlayers()) this.opts.send(s.id, { t: 'quiz', item: this.quizItem, seconds: this.quizSeconds, title });
+      this.setTimer(this.quizSeconds * 1000 + this.graceMs, () => this.resolveBossQuiz());
       return;
     }
-    this.turnIndex++;
+    this.bossShoot(boss.def.weapon, [this.bossTarget()]);
+  }
+
+  private bossAnswer(seat: Seat, chosen: number) {
+    const correct = chosen === this.quizItem!.correctIndex;
+    this.bossAnswers.set(seat.id, correct);
+    this.deck.report(this.quizItem!.question, correct);
+    if (correct) addGauge(seat.skills, GAUGE_CORRECT_ANSWER);
+    this.broadcast({ t: 'quizResult', id: seat.id, correct });
+    if (this.bossAnswers.size >= this.livePlayers().length) this.resolveBossQuiz();
+  }
+
+  private resolveBossQuiz() {
+    if (this.phase !== 'quiz') return;
+    this.clearTimer();
+    this.phase = 'resolving';
+    const boss = this.boss!;
+    const live = this.livePlayers();
+    const right = live.filter((s) => this.bossAnswers.get(s.id));
+    const interrupted = live.length > 0 && right.length >= Math.ceil(live.length * COOP_INTERRUPT_SHARE);
+    this.broadcast({ t: 'bossQuiz', correct: right.length, total: live.length, interrupted, name: boss.def.ultimate.name });
+    if (interrupted) {
+      // Stunned: no ultimate; whoever answered right hits harder next time
+      for (const s of right) s.bonus = COOP_ANSWER_BONUS;
+      this.later(1800, () => this.endTurn());
+      return;
+    }
+    // The ultimate: one shell at each player still standing (up to three)
+    const targets = [...live].sort(() => this.rng.next() - 0.5).slice(0, 3);
+    this.later(1500, () => this.bossShoot(boss.def.ultimate.weapon, targets.map((s) => s.unit)));
+  }
+
+  /** The player the boss goes for: the weakest one (that's what bosses do) */
+  private bossTarget(): Unit {
+    const live = this.livePlayers();
+    live.sort((a, b) => a.unit.hp - b.unit.hp || this.rng.next() - 0.5);
+    return live[0].unit;
+  }
+
+  private bossShoot(weapon: WeaponStats, targets: Unit[]) {
+    const boss = this.boss!;
+    const body = bossBody(boss.def.height);
+    const units = this.allUnits();
+    const timelines: ShotTimeline[] = [];
+    let angle = 50;
+    let hitAny = false;
+    for (const target of targets) {
+      if (!boss.unit.alive || !target.alive) continue;
+      boss.facing = target.x < boss.unit.x ? -1 : 1;
+      const muzzle = { x: boss.unit.x + body.muzzle.x * -boss.facing, y: boss.unit.y + body.muzzle.y };
+      const plan = planShot(muzzle, boss.facing, { id: target.id, x: target.x, y: target.y, radius: target.radius, offsetY: target.offsetY }, this.wind, this.terrain, units.filter((u) => u.alive).map((u) => ({ id: u.id, x: u.x, y: u.y, radius: u.radius, offsetY: u.offsetY })), BOSS_ID, boss.skill, this.rng);
+      angle = plan.angle;
+      const result = resolveShot(this.terrain, units, {
+        shooterId: BOSS_ID,
+        input: { x: muzzle.x, y: muzzle.y, angleDeg: plan.angle, facing: boss.facing, power: plan.power, wind: this.wind },
+        mode: 'normal',
+        special: null,
+        damage: weapon.damage,
+        radius: weapon.radius,
+        damageMul: 1,
+      }, { modifyDamage: this.shieldDamage });
+      this.terrain = result.terrain;
+      const tl = compact(result);
+      hitAny ||= tl.events.some((e) => e.kind === 'explode' && e.hits.some((h) => h.id === target.id && h.damage > 0));
+      timelines.push(tl);
+    }
+    // Like the stages: it aims better after a miss
+    boss.skill = nextEnemySkill(boss.skill, boss.def.skill, hitAny);
+    for (const [id, n] of gaugeGains(timelines, BOSS_ID)) {
+      const s = this.seats.find((o) => o.id === id);
+      if (s) addGauge(s.skills, n);
+    }
+    this.sendShot(BOSS_ID, boss.unit, boss.facing, angle, [], timelines, weapon.projectile);
+  }
+
+  // ---- End -------------------------------------------------------------------------------
+
+  private endTurn() {
+    const side = (t: 0 | 1) => this.allUnits().some((u) => u.alive && this.teamOf(u.id) === t && !this.seats.find((s) => s.id === u.id)?.gone);
+    const a = side(0);
+    const b = side(1);
+    if (!a || !b) {
+      this.finish(a ? 0 : b ? 1 : null, 'win');
+      return;
+    }
     this.beginTurn();
   }
 
-  private finish(winner: string | null, reason: 'win' | 'left') {
+  private finish(team: 0 | 1 | null, reason: 'win' | 'left') {
     this.clearTimer();
     this.phase = 'over';
-    this.broadcast({ t: 'over', winner, reason });
+    // `winner`: a player on the winning side (for 1 v 1 that's simply the winner); the boss if it won
+    const winner = team === null ? null : team === 1 && this.boss ? BOSS_ID : (this.seats.find((s) => s.info.team === team && !s.gone)?.id ?? null);
+    this.broadcast({ t: 'over', winner, reason, team });
   }
 
   // ---- Helpers --------------------------------------------------------------------
 
   private broadcast(msg: ServerMessage) {
-    for (const s of this.seats) this.opts.send(s.id, msg);
+    for (const s of this.seats) if (!s.gone) this.opts.send(s.id, msg);
   }
 
-  private sendOther(seat: Seat, msg: ServerMessage) {
-    const o = this.other(seat);
-    if (o) this.opts.send(o.id, msg);
+  private sendOthers(seat: Seat, msg: ServerMessage) {
+    for (const s of this.seats) if (s !== seat && !s.gone) this.opts.send(s.id, msg);
   }
 
   private setTimer(ms: number, fn: () => void) {

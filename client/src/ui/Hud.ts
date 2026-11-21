@@ -17,9 +17,18 @@ interface FighterPanel {
   portrait: Phaser.GameObjects.Image;
   hpBar: FrameBar;
   hpText: Phaser.GameObjects.Text;
+  /** Where the portrait rests (it bobs while it's that fighter's turn) */
+  baseY: number;
 }
 
 const MINIMAP = { x: GAME_WIDTH / 2 - 120, y: 122, w: 240, h: 64 };
+/** Small panels when there are more than two on the field (2 v 2, co-op) */
+const COMPACT = { w: 300, h: 46, gap: 4 };
+
+export interface HudOptions {
+  /** Which side of the screen a fighter's panel goes on (default: first left, the rest right) */
+  side?: (c: Combatant, index: number) => 'left' | 'right';
+}
 
 /** Everything drawn on top of the battlefield (doesn't scroll with the camera) */
 export class Hud {
@@ -40,6 +49,11 @@ export class Hud {
   private statusItems: Phaser.GameObjects.GameObject[] = [];
   private lastBanner?: Phaser.GameObjects.Text;
   private countdownText?: Phaser.GameObjects.Text;
+  /** Bottom of the panels on the left (status icons and award ribbons go below) */
+  readonly leftBottom: number;
+  /** "Who's next" faces (2 v 2, co-op) */
+  private orderItems: Phaser.GameObjects.GameObject[] = [];
+  private readonly compact: boolean;
   /** Shot award ribbons on screen now (new ones go underneath) */
   private awards: Phaser.GameObjects.Container[] = [];
   /** Whether a fighter gets a dot on the mini-map (camouflage hides it from the other side) */
@@ -49,8 +63,18 @@ export class Hud {
     private readonly scene: Phaser.Scene,
     private readonly fighters: Combatant[],
     worldWidth: number,
+    opts: HudOptions = {},
   ) {
-    fighters.forEach((f, i) => this.panels.push(this.fighterPanel(f, i === 0 ? 'left' : 'right')));
+    const sideOf = opts.side ?? ((_c: Combatant, i: number) => (i === 0 ? 'left' : 'right'));
+    this.compact = fighters.length > 2;
+    const stacked = { left: 0, right: 0 };
+    fighters.forEach((f, i) => {
+      const side = sideOf(f, i);
+      // One big panel per side for 1 v 1 (or a boss); small stacked ones for teams
+      const small = this.compact && fighters.filter((o, k) => sideOf(o, k) === side).length > 1;
+      this.panels.push(small ? this.compactPanel(f, side, stacked[side]++) : this.fighterPanel(f, side));
+    });
+    this.leftBottom = stacked.left > 1 ? 8 + stacked.left * (COMPACT.h + COMPACT.gap) : 100;
 
     // Turn timer
     const timerBg = scene.add.circle(GAME_WIDTH / 2, 44, 34, 0x1b1d3a, 0.75).setStrokeStyle(4, 0xffcc33);
@@ -114,7 +138,28 @@ export class Hud {
     const hpText = s.add.text(edge + dir * 222, 68, '', textStyle(15)).setOrigin(0.5);
 
     for (const o of [plate, portrait, name, ...hpBar.objects, hpText]) o.setScrollFactor(0).setDepth(DEPTH.hud);
-    const panel = { portrait, hpBar, hpText };
+    const panel = { portrait, hpBar, hpText, baseY: 96 };
+    this.setHpBar(panel, f);
+    return panel;
+  }
+
+  /** Small panel: face, name, health; stacked down the side */
+  private compactPanel(f: Combatant, side: 'left' | 'right', row: number): FighterPanel {
+    const s = this.scene;
+    const dir = side === 'left' ? 1 : -1;
+    const edge = side === 'left' ? 8 : GAME_WIDTH - 8;
+    const y = 8 + row * (COMPACT.h + COMPACT.gap);
+    const plate = s.add.graphics();
+    plate.fillStyle(0x1b1d3a, 0.6).fillRoundedRect(side === 'left' ? edge : edge - COMPACT.w, y, COMPACT.w, COMPACT.h, 12);
+    // Team colour stripe
+    plate.fillStyle(f.color, 1).fillRoundedRect(side === 'left' ? edge : edge - 6, y + 4, 6, COMPACT.h - 8, 3);
+    const portrait = s.add.image(edge + dir * 34, y + COMPACT.h - 2, f.portraitKey).setOrigin(0.5, 1);
+    portrait.setScale(Math.min((COMPACT.h - 4) / portrait.height, 52 / portrait.width));
+    const name = s.add.text(edge + dir * 64, y + 2, f.name, textStyle(15)).setOrigin(side === 'left' ? 0 : 1, 0);
+    const hpBar = new FrameBar(s, edge + dir * 180, y + 32, 220, 24, BAR_FRAMES.hp);
+    const hpText = s.add.text(edge + dir * 180, y + 32, '', textStyle(12)).setOrigin(0.5);
+    for (const o of [plate, portrait, name, ...hpBar.objects, hpText]) o.setScrollFactor(0).setDepth(DEPTH.hud);
+    const panel = { portrait, hpBar, hpText, baseY: y + COMPACT.h - 2 };
     this.setHpBar(panel, f);
     return panel;
   }
@@ -133,8 +178,8 @@ export class Hud {
     this.panels.forEach((p, i) => {
       this.scene.tweens.killTweensOf(p.portrait);
       p.portrait.setAlpha(i === index ? 1 : 0.55);
-      if (i === index) this.scene.tweens.add({ targets: p.portrait, y: 90, duration: 300, yoyo: true, repeat: -1 });
-      else p.portrait.y = 96;
+      p.portrait.y = p.baseY;
+      if (i === index) this.scene.tweens.add({ targets: p.portrait, y: p.baseY - 6, duration: 300, yoyo: true, repeat: -1 });
     });
   }
 
@@ -144,9 +189,10 @@ export class Hud {
     this.statusItems = [];
     let x = 20;
     for (const it of items) {
-      const icon = this.scene.add.image(x, 124, it.icon).setOrigin(0, 0.5);
+      const y = this.leftBottom + 24;
+      const icon = this.scene.add.image(x, y, it.icon).setOrigin(0, 0.5);
       icon.setScale(30 / icon.height);
-      const label = this.scene.add.text(x + icon.displayWidth + 4, 124, it.text, textStyle(17)).setOrigin(0, 0.5);
+      const label = this.scene.add.text(x + icon.displayWidth + 4, y, it.text, textStyle(17)).setOrigin(0, 0.5);
       for (const o of [icon, label]) o.setScrollFactor(0).setDepth(DEPTH.hud);
       this.statusItems.push(icon, label);
       x += icon.displayWidth + label.width + 18;
@@ -243,7 +289,7 @@ export class Hud {
    */
   award(text: string, color = '#fff3b0') {
     this.awards = this.awards.filter((a) => a.active);
-    const y = 186 + this.awards.length * 52;
+    const y = this.leftBottom + 86 + this.awards.length * 52;
     const label = this.scene.add.text(0, 0, text, textStyle(28, color)).setOrigin(0.5);
     const w = label.width + 70;
     const ribbon = this.scene.add.graphics();
@@ -269,6 +315,34 @@ export class Hud {
       .setAlpha(0);
     this.scene.tweens.add({ targets: t, scale: 1, alpha: 1, angle: -6, duration: 260, ease: 'Back.out' });
     this.scene.tweens.add({ targets: t, alpha: 0, scale: 1.2, delay: 1100, duration: 400, onComplete: () => t.destroy() });
+  }
+
+  /**
+   * The next few turns as a row of small faces under the mini-map (turn order
+   * goes by delay, so a big turn can push you back).
+   */
+  setOrder(next: Combatant[]) {
+    this.orderItems.forEach((o) => o.destroy());
+    this.orderItems = [];
+    if (next.length === 0) return;
+    const y = MINIMAP.y + MINIMAP.h + 26;
+    const size = 34;
+    const x0 = GAME_WIDTH / 2 - ((next.length - 1) * (size + 8)) / 2 + 30;
+    const label = this.scene.add.text(x0 - 34, y, 'ต่อไป', textStyle(15, '#bfe8ff')).setOrigin(1, 0.5);
+    this.orderItems.push(label);
+    next.forEach((c, i) => {
+      const x = x0 + i * (size + 8);
+      const ring = this.scene.add.circle(x, y, size / 2 + 2, 0x1b1d3a, 0.8).setStrokeStyle(3, c.color);
+      const face = this.scene.add.image(x, y + size / 2, c.portraitKey).setOrigin(0.5, 1);
+      face.setScale(Math.min(size / face.height, size / face.width));
+      this.orderItems.push(ring, face);
+    });
+    for (const o of this.orderItems) (o as unknown as Phaser.GameObjects.Components.ScrollFactor & Phaser.GameObjects.Components.Depth).setScrollFactor(0).setDepth(DEPTH.hud);
+  }
+
+  /** More than two on the field: small stacked panels */
+  get isCompact(): boolean {
+    return this.compact;
   }
 
   /** Big number in the middle of the screen for the last seconds of a turn (5, 4, 3, 2, 1) */

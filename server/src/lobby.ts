@@ -1,6 +1,7 @@
-// Connections and rooms: "สร้างห้อง" makes a 5-character code, "เข้าห้อง" joins it.
+// Connections and rooms: "สร้างห้อง" makes a 5-character code, "เข้าห้อง" joins it
+// (by code, or from the list of open rooms of the same classroom).
 import { randomInt } from 'node:crypto';
-import { ROOM_CODE_ALPHABET, ROOM_CODE_LENGTH, type ClientMessage, type Question, type ServerMessage } from '@sciboom/shared';
+import { ROOM_CODE_ALPHABET, ROOM_CODE_LENGTH, ROOM_MODES, type ClientMessage, type Question, type RoomMode, type ServerMessage } from '@sciboom/shared';
 import { PvpRoom, type RoomOptions } from './pvp';
 
 type Hello = Extract<ClientMessage, { t: 'hello' }>;
@@ -79,16 +80,24 @@ export class Lobby {
         if (!client.hello) return this.error(id, 'ยังไม่ได้แนะนำตัว');
         this.leaveRoom(client);
         const code = this.newCode();
-        const room = new PvpRoom(code, !!msg.quizDuel, {
-          ...this.opts.room,
-          questions: await this.opts.questions(),
-          send: (pid, m) => this.send(pid, m),
-        });
-        room.addPlayer(id, client.hello);
-        client.room = room;
+        const mode: RoomMode = ROOM_MODES.includes(msg.mode as RoomMode) ? (msg.mode as RoomMode) : 'duel';
+        const room = new PvpRoom(
+          code,
+          !!msg.quizDuel,
+          {
+            ...this.opts.room,
+            questions: await this.opts.questions(),
+            send: (pid, m) => this.send(pid, m),
+          },
+          mode,
+        );
         this.rooms.set(code, room);
         this.roomGroups.set(code, client.group);
-        return this.send(id, { t: 'created', code, quizDuel: room.quizDuel });
+        this.send(id, { t: 'created', code, quizDuel: room.quizDuel, mode });
+        room.addPlayer(id, client.hello);
+        client.room = room;
+        this.sendRoomList(client.group);
+        return;
       }
       case 'join': {
         if (!client.hello) return this.error(id, 'ยังไม่ได้แนะนำตัว');
@@ -101,9 +110,20 @@ export class Lobby {
         this.leaveRoom(client);
         room.addPlayer(id, client.hello);
         client.room = room;
-        room.start();
+        // A full room starts by itself; a co-op raid can also be started early by its host ("begin")
+        if (room.full) room.start();
+        this.sendRoomList(group);
         return;
       }
+      case 'begin': {
+        const room = client.room;
+        if (!room || room.phase !== 'waiting' || room.host?.id !== id || room.seats.length < room.minPlayers) return;
+        room.start();
+        this.sendRoomList(this.roomGroups.get(room.code) ?? null);
+        return;
+      }
+      case 'list':
+        return this.send(id, { t: 'roomList', rooms: this.openRooms(client.group) });
       case 'leave':
         return this.leaveRoom(client);
       default:
@@ -130,10 +150,28 @@ export class Lobby {
     if (!room) return;
     client.room = null;
     room.removePlayer(client.id);
-    if (room.seats.length === 0) {
+    const group = this.roomGroups.get(room.code) ?? null;
+    // Gone for good when nobody's left in it (players who left mid-match don't count)
+    if (room.seats.every((s) => [...this.clients.values()].every((c) => c.room !== room || c.id !== s.id))) {
       room.dispose();
       this.rooms.delete(room.code);
       this.roomGroups.delete(room.code);
+    }
+    this.sendRoomList(group);
+  }
+
+  /** Rooms still waiting for players, that people in this group may join */
+  private openRooms(group: string | null) {
+    return [...this.rooms.values()]
+      .filter((r) => r.phase === 'waiting' && !r.full && r.seats.length > 0 && (this.roomGroups.get(r.code) ?? null) === group)
+      .map((r) => r.summary());
+  }
+
+  /** Everyone of the group who's in the lobby (not in a room) sees the new list */
+  private sendRoomList(group: string | null) {
+    const rooms = this.openRooms(group);
+    for (const c of this.clients.values()) {
+      if (c.hello && !c.room && c.group === group) this.send(c.id, { t: 'roomList', rooms });
     }
   }
 

@@ -60,7 +60,7 @@ const b = await player('บี', 'girl');
 await shot(a, '1-lobby');
 
 // A makes a room
-await a.mouse.click(340, 470);
+await a.mouse.click(330, 510); // "สร้างห้อง"
 await a.waitForFunction(() => window.game.scene.getScene('Lobby').children.list.some((o) => o.type === 'Text' && /^[A-Z2-9]{5}$/.test(o.text)));
 const code = await a.evaluate(() => window.game.scene.getScene('Lobby').children.list.find((o) => o.type === 'Text' && /^[A-Z2-9]{5}$/.test(o.text)).text);
 console.log('room code', code);
@@ -68,7 +68,7 @@ await shot(a, '2-waiting');
 
 // B joins with the code
 await b.fill('input[placeholder="ABCDE"]', code);
-await b.mouse.click(940, 470);
+await b.mouse.click(1090, 510); // "เข้าห้อง"
 await Promise.all([a, b].map((p) => p.waitForFunction(() => window.game.scene.isActive('Online'))));
 await myTurn(a);
 await shot(a, '3-a-turn');
@@ -120,12 +120,12 @@ assert.ok(texts.some((t) => t.includes('เพื่อนออกจากเ�
 await a.mouse.click(640, 410); // "กลับห้องรอ" (the only button: no rematch after leaving)
 await Promise.all([a, b].map((p) => p.waitForFunction(() => window.game.scene.getScene('Lobby')?.net?.isOpen, null, { timeout: 15_000 })));
 await a.waitForTimeout(300);
-await a.mouse.click(340, 350); // Quiz Duel toggle
-await a.mouse.click(340, 470);
+await a.mouse.click(330, 402); // Quiz Duel toggle
+await a.mouse.click(330, 510); // "สร้างห้อง"
 await a.waitForFunction(() => window.game.scene.getScene('Lobby').children.list.some((o) => o.type === 'Text' && /^[A-Z2-9]{5}$/.test(o.text)));
 const code2 = await a.evaluate(() => window.game.scene.getScene('Lobby').children.list.find((o) => o.type === 'Text' && /^[A-Z2-9]{5}$/.test(o.text)).text);
 await b.fill('input[placeholder="ABCDE"]', code2);
-await b.mouse.click(940, 470);
+await b.mouse.click(1090, 510); // "เข้าห้อง"
 await a.waitForFunction(() => window.game.scene.getScene('Online')?.phase === 'quiz', null, { timeout: 15_000 });
 await a.waitForTimeout(600);
 await shot(a, '8-quiz-duel');
