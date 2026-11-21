@@ -6,7 +6,7 @@ export function explainDbError(err: unknown, url: string | undefined): string {
   const e = err as { code?: string; message?: string };
   const code = e?.code ?? '';
   const msg = String(e?.message ?? err);
-  const lines = ['เปิดฐานข้อมูลไม่ได้ เซิร์ฟเวอร์จึงหยุดทำงาน', ''];
+  const lines = ['เปิดฐานข้อมูลไม่ได้ (ระบบบัญชีนักเรียนและหน้าครูยังใช้ไม่ได้)', ''];
   if (url && url.includes('[YOUR-PASSWORD]')) {
     lines.push('สาเหตุ: DATABASE_URL ยังมีคำว่า [YOUR-PASSWORD] อยู่ ต้องแทนที่ด้วยรหัสผ่านจริง (ลบวงเล็บเหลี่ยมด้วย)');
   } else if (code === '28P01' || /password authentication failed/i.test(msg)) {
@@ -14,7 +14,7 @@ export function explainDbError(err: unknown, url: string | undefined): string {
   } else if (/tenant or user not found|tenant\/user \S+ not found/i.test(msg)) {
     // Supabase can't find the project named in the user name (postgres.<project>)
     lines.push('สาเหตุ: Supabase หาโปรเจคใน DATABASE_URL ไม่เจอ เป็นได้ 2 แบบ:');
-    lines.push('  1) โปรเจคถูกพัก (Paused) เพราะไม่มีคนใช้ 7 วัน: เข้า supabase.com > เลือกโปรเจค > กด Restore รอ 2-3 นาที แล้วกด Manual Deploy ใน Render');
+    lines.push('  1) โปรเจคถูกพัก (Paused) เพราะไม่มีคนใช้ 7 วัน: เข้า supabase.com > เลือกโปรเจค > กด Restore รอ 2-3 นาที แล้วเซิร์ฟเวอร์จะต่อได้เอง (ลองใหม่ทุก 1 นาที ไม่ต้อง deploy ใหม่)');
     lines.push('  2) โปรเจคถูกลบ หรือชื่อผู้ใช้ผิด (ต้องเป็น postgres.รหัสโปรเจค): คัดลอกจาก Supabase > Connect > Session pooler ใหม่ แล้วแก้ DATABASE_URL');
   } else if (code === 'ENOTFOUND' || code === 'EAI_AGAIN') {
     lines.push('สาเหตุ: ชื่อเซิร์ฟเวอร์ใน DATABASE_URL ผิด หรือพิมพ์ตกหล่น (คัดลอกจาก Supabase ใหม่ทั้งบรรทัด)');
@@ -25,7 +25,7 @@ export function explainDbError(err: unknown, url: string | undefined): string {
   } else {
     lines.push(`สาเหตุที่ระบบแจ้ง: ${code ? `[${code}] ` : ''}${msg}`);
   }
-  lines.push('', 'วิธีแก้: Render > บริการ sciboom > Environment > แก้ DATABASE_URL > Save แล้วรอ deploy ใหม่ (ดูขั้นตอนใน docs/DEPLOY.md)');
+  lines.push('', 'ถ้าต้องแก้ DATABASE_URL: Render > บริการ sciboom > Environment > แก้ DATABASE_URL > Save แล้วรอ deploy ใหม่ (ดูขั้นตอนใน docs/DEPLOY.md)');
   // Never show the password, even if it appears inside the error message
   return lines.join('\n').replace(/(postgres(?:ql)?:\/\/[^:\s]+:)[^@\s]+@/g, '$1****@');
 }

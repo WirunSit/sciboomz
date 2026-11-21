@@ -327,5 +327,12 @@ npm run dev      # เปิดเกม (พอร์ต 8080) + เซิร�
   - ทัวร์นาเมนต์อยู่ในหน่วยความจำของเซิร์ฟเวอร์ (ถ้าเซิร์ฟเวอร์รีสตาร์ต เช่น Render หลับ ต้องเปิดใหม่) และเล่นได้เฉพาะนักเรียนที่เข้าสู่ระบบ
   - เทสต์: `server/test/tournament.test.ts` (3 ข้อ), `npm run playtest:tournament -w tools`
 - [x] เทสต์ลำดับตาโหมดทีมเคยพลาดบางครั้งเมื่อเครื่องช้า (เวลาต่อตาในเทสต์สั้นเกิน) — แก้แล้ว
+- [x] **กันฐานข้อมูลหลับ** (Render deploy failed 2026-11-21 เพราะ Supabase พักโปรเจค: `tenant/user ... not found`)
+  - `server/src/dbGate.ts`: เซิร์ฟเวอร์ไม่หยุดเมื่อต่อฐานข้อมูลไม่ได้ ลองใหม่ 5 วิ/15 วิ/30 วิ แล้วทุก 1 นาที ระหว่างรอ: `/api/questions` ใช้คำถามที่มากับเกม,
+    API อื่นตอบ 503 "ระบบบัญชีนักเรียนกำลังเตรียมตัว", PvP เล่นแบบแขกได้, `/api/health` ตอบ 200 เสมอ (`"db":"waiting"`) Render จึงไม่ deploy failed
+  - `/api/health?db=1` ถามฐานข้อมูลจริง (`Store.ping`) ตอบ 503 ถ้าต่อไม่ได้
+  - `.github/workflows/keep-awake.yml`: GitHub เรียก `/api/health?db=1` ทุก 3 วัน (08:00 ไทย) — **ผู้ใช้ต้องตั้ง Actions variable `SITE_URL` เอง** (DEPLOY.md หัวข้อ "ตัวปลุกฐานข้อมูลอัตโนมัติ")
+  - `dbHelp.ts` รู้จักข้อความใหม่ของ Supabase (`tenant/user ... not found`) → บอกให้กด Restore
+  - **ยังค้าง (ผู้ใช้ทำ):** Restore โปรเจคใน Supabase (หรือสร้างใหม่ถ้าถูกลบ) และตั้ง `SITE_URL`
 - [ ] ข้อ 0: ให้นักเรียนจริงลองเล่น (ผู้ใช้ทำ) — สังเกตเพิ่ม: เด็กตกเหวบ่อยเกินไปไหม, ภารกิจรายวันยาก/ง่าย, โหมดทีมรอตานานไหม, บอสร่วมกันอึดเกินไหม (`COOP_BOSSES` / `coopBossHp` ใน `shared/src/multiplayer.ts`)
 - playtest ทั้งหมดของรอบนี้: `playtest:feel`, `playtest:maps`, `playtest:progress`, `playtest:team`, `playtest:tournament` (ต้องเปิด `npm run dev`)

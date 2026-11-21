@@ -143,6 +143,11 @@ export class Store {
 
   // ---- Sessions ------------------------------------------------------------------------
 
+  /** A tiny real query (the keep-awake job uses it so the database sees activity) */
+  async ping(): Promise<void> {
+    await this.db.get('SELECT 1 AS one');
+  }
+
   async newSession(kind: 'teacher' | 'student', userId: string): Promise<string> {
     const token = randomBytes(24).toString('base64url');
     const days = kind === 'teacher' ? TEACHER_SESSION_DAYS : STUDENT_SESSION_DAYS;

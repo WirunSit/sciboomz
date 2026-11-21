@@ -1,0 +1,46 @@
+# Keep the game's database awake.
+# Supabase's free plan pauses a project after 7 days with no activity, and then
+# students can't log in. Every 3 days GitHub opens the game's health page with
+# ?db=1, which runs a tiny real query on the database: that counts as activity.
+# (Render's free plan sleeps too: the first request wakes it, which can take a minute.)
+#
+# Setup (once): GitHub > this repo > Settings > Secrets and variables > Actions >
+#   Variables > New repository variable:  SITE_URL = https://<your game>.onrender.com
+# If the database can't be reached, this job fails and GitHub emails you:
+# then open Supabase and press "Restore" (see docs/DEPLOY.md).
+name: Keep database awake
+
+on:
+  schedule:
+    # 01:00 UTC = 08:00 in Thailand, every 3 days
+    - cron: '0 1 */3 * *'
+  # "Run workflow" button in the Actions tab, to try it now
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Wake the server and touch the database
+        env:
+          SITE_URL: ${{ vars.SITE_URL }}
+        run: |
+          if [ -z "$SITE_URL" ]; then
+            echo "::error::ยังไม่ได้ตั้งค่า SITE_URL (Settings > Secrets and variables > Actions > Variables) เช่น https://sciboom-xxxx.onrender.com"
+            exit 1
+          fi
+          url="${SITE_URL%/}/api/health?db=1"
+          # Render may need a minute to wake up, and the database a little longer: try for ~10 minutes
+          for i in $(seq 1 10); do
+            echo "ครั้งที่ $i: $url"
+            code=$(curl -s -o body.json -w '%{http_code}' --max-time 90 "$url" || echo 000)
+            echo "ได้ $code: $(cat body.json 2>/dev/null)"
+            if [ "$code" = "200" ]; then
+              echo "ฐานข้อมูลตื่นอยู่ ใช้งานได้"
+              exit 0
+            fi
+            sleep 60
+          done
+          echo "::error::ต่อฐานข้อมูลไม่ได้ เข้า supabase.com แล้วดูว่าโปรเจคถูกพัก (Paused) ไหม ถ้าใช่ให้กด Restore (ดู docs/DEPLOY.md หัวข้อ เปิดเว็บไม่ได้?)"
+          exit 1
