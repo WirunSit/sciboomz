@@ -312,3 +312,16 @@ npm run dev      # เปิดเกม (พอร์ต 8080) + เซิร�
 | `npm run playtest:online -w tools` | ทดสอบ PvP ออนไลน์ด้วย 2 เบราว์เซอร์ + Quiz Duel |
 | `npm run playtest:accounts -w tools` | ทดสอบหน้าครู + นักเรียนเข้าสู่ระบบ + สถิติ |
 | `npm run costumes -w tools` | ถ่ายภาพของแต่งทุกชิ้นบนทุกท่า ไว้ที่ `art/debug/costumes/` |
+
+## งานรอบ 2026-11-21 — พัฒนาให้สนุกขึ้น (เทียบ Boom Z / DDTank)
+- [x] ความรู้สึกตอนยิง: นัดปิดเกม K.O. (สโลว์โมชัน + ซูมเข้า), ประกายระเบิดตามอาวุธ, เศษดินกระเด็น, หางกระสุน, ป้ายรางวัล ("ยิงไกล!", "ยิงทีเดียว 2 ตัว!" ฯลฯ) — `game/effects.ts`, `playtest:feel`
+- [x] แผนที่ใหม่: เกาะลอยฟ้า / หุบเหว (`Terrain.generate(seed, style)`, `standX`) โลก 2,5 = เกาะ, โลก 4 = หุบเหว, PvP สุ่ม — `playtest:maps`
+- [x] ภารกิจรายวัน 3 ข้อ + โบนัส, เหรียญรางวัล 37 ขั้น (`shared/quests.ts`, หน้า `Quests`), อันดับในห้อง (`/api/student/leaderboard`, หน้า `Leaderboard`), โหมดยาก (เปิดเมื่อปราบบอสโลกนั้น), บทฝึกเล่น 3 ตาแรก (`ui/Coach.ts`) — `playtest:progress`
+- [x] ออนไลน์: ทีม 2v2, ตีบอสร่วมกัน 1–4 คน (คำถามขัดท่าบอสถามทุกคนพร้อมกัน), ลำดับตาแบบดีเลย์, รายชื่อห้องที่เปิดอยู่, ข้อความสำเร็จรูป (ปุ่ม "พูด") — `shared/multiplayer.ts`, `playtest:team`
+- [x] `npm run dev` บังคับเซิร์ฟเวอร์ใช้พอร์ต 8081 เสมอ (เดิมถ้ามีคนตั้ง PORT=8080 เซิร์ฟเวอร์จะแย่งพอร์ตเกม)
+- [ ] **ทัวร์นาเมนต์ที่ครูเปิด (ทำไปครึ่งเดียว)**: เสร็จแล้วเฉพาะฝั่งเซิร์ฟเวอร์ — `server/src/tournament.ts` (สายแข่งแพ้คัดออก + bye),
+  `Lobby.openTournament/startTournament/cancelTournament/tournamentView`, ข้อความ `tjoin`/`tleave`/`tourney`, ห้องแข่งไม่มีรีแมตช์ (`label`, `onOver`), เดินผ่านถ้าอีกคนไม่อยู่ 60 วิ
+  **ที่ยังค้าง:** (1) route ใน `api.ts` สำหรับครู (GET/POST/DELETE `/api/teacher/classrooms/:id/tournament` + `/start`) — ต้องส่ง `lobby` เข้า `createApi` ใน `main.ts` (สร้าง lobby ก่อน api)
+  (2) แท็บ "ทัวร์นาเมนต์" ในหน้าครู (`client/src/teacher/main.ts`) + ภาพสายแข่งเต็มจอสำหรับโปรเจกเตอร์ (3) แถบทัวร์นาเมนต์ในหน้า Lobby ของเกม (ปุ่มเข้าร่วม, แสดงสถานะ `tourney`)
+  (4) ซ่อนปุ่ม "เล่นอีกครั้ง" และแสดง `start.label` ใน OnlineBattleScene (5) เทสต์ของ `tournament.ts` และ lobby
+- [ ] ข้อ 0: ให้นักเรียนจริงลองเล่น (ผู้ใช้ทำ)

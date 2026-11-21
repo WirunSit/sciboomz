@@ -36,6 +36,19 @@ export interface BossInfo {
   y: number;
 }
 
+/** One student's place in the classroom tournament */
+export interface TourneyStudentView {
+  status: 'signup' | 'running' | 'done';
+  players: number;
+  joined: boolean;
+  /** Round being played (1-based) and how many there are */
+  round: number;
+  rounds: number;
+  me: 'signup' | 'waiting' | 'playing' | 'through' | 'out' | 'champion' | 'none';
+  opponent: string | null;
+  champion: string | null;
+}
+
 /** A room someone can join, as listed in the lobby */
 export interface RoomSummary {
   code: string;
@@ -55,6 +68,9 @@ export type ClientMessage =
   /** The host starts a co-op room before it's full */
   | { t: 'begin' }
   | { t: 'emote'; id: number }
+  /** Sign up for / drop out of the classroom tournament the teacher opened */
+  | { t: 'tjoin' }
+  | { t: 'tleave' }
   | { t: 'leave' }
   | { t: 'move'; x: number; y: number; facing: 1 | -1; angle: number }
   | { t: 'skill'; slot: InstantSkill }
@@ -70,7 +86,19 @@ export type ServerMessage =
   | { t: 'room'; code: string; mode: RoomMode; quizDuel: boolean; host: string; players: { id: string; name: string; team: 0 | 1 }[]; seats: number }
   | { t: 'roomList'; rooms: RoomSummary[] }
   | { t: 'error'; message: string }
-  | { t: 'start'; you: string; code: string; seed: number; map: number[]; players: PlayerInfo[]; quizDuel: boolean; mode: RoomMode; boss: BossInfo | null }
+  | {
+      t: 'start';
+      you: string;
+      code: string;
+      seed: number;
+      map: number[];
+      players: PlayerInfo[];
+      quizDuel: boolean;
+      mode: RoomMode;
+      boss: BossInfo | null;
+      /** A tournament match: shown at the start, and there's no rematch */
+      label?: string;
+    }
   | {
       t: 'turn';
       actor: string;
@@ -87,6 +115,8 @@ export type ServerMessage =
   /** Co-op: how the class did on the boss's question, and whether its ultimate was stopped */
   | { t: 'bossQuiz'; correct: number; total: number; interrupted: boolean; name: string }
   | { t: 'emote'; id: string; emote: number }
+  /** The classroom tournament as this student sees it (null: none open) */
+  | { t: 'tourney'; view: TourneyStudentView | null }
   | { t: 'moved'; id: string; x: number; y: number; facing: 1 | -1; angle: number }
   | { t: 'skillUsed'; id: string; slot: InstantSkill; hp: number; skills: SkillState | null }
   | {

@@ -82,6 +82,9 @@ export interface RoomOptions {
   seed?: number;
   /** Co-op: which boss (default: picked at random) */
   bossId?: string;
+  /** Tournament match: a label for the players, no rematch, and who won goes back to the bracket */
+  label?: string;
+  onOver?: (winnerSeatId: string | null) => void;
 }
 
 interface Seat {
@@ -249,7 +252,7 @@ export class PvpRoom {
       y: this.boss.unit.y,
     };
     for (const s of this.seats) {
-      this.opts.send(s.id, { t: 'start', you: s.id, code: this.code, seed, map, players, quizDuel: this.quizDuel, mode: this.mode, boss });
+      this.opts.send(s.id, { t: 'start', you: s.id, code: this.code, seed, map, players, quizDuel: this.quizDuel, mode: this.mode, boss, label: this.opts.label });
     }
     this.beginTurn();
   }
@@ -328,7 +331,7 @@ export class PvpRoom {
         break;
       }
       case 'rematch':
-        if (this.phase !== 'over' || this.seats.some((s) => s.gone)) break;
+        if (this.phase !== 'over' || this.seats.some((s) => s.gone) || this.opts.label) break;
         seat.wantsRematch = true;
         this.sendOthers(seat, { t: 'rematchWanted', id });
         if (this.seats.length >= this.minPlayers && this.seats.every((s) => s.wantsRematch)) this.start();
@@ -683,6 +686,11 @@ export class PvpRoom {
     // `winner`: a player on the winning side (for 1 v 1 that's simply the winner); the boss if it won
     const winner = team === null ? null : team === 1 && this.boss ? BOSS_ID : (this.seats.find((s) => s.info.team === team && !s.gone)?.id ?? null);
     this.broadcast({ t: 'over', winner, reason, team });
+    // A tournament needs a winner even after a draw: whoever had more health left
+    const decided = winner ?? [...this.seats].sort((x, y) => y.unit.hp - x.unit.hp)[0]?.id ?? null;
+    const report = this.opts.onOver;
+    this.opts.onOver = undefined;
+    report?.(decided);
   }
 
   // ---- Helpers --------------------------------------------------------------------

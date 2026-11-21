@@ -36,7 +36,7 @@ const lobby = new Lobby({
     if (!s || s.kind !== 'student') return undefined;
     const p = await store.studentProfile(s.userId);
     // Same classroom only, unless the teacher opened PvP to other open classrooms
-    return { group: p.classroom.pvpOpen ? 'open' : p.classroom.id, name: p.nickname };
+    return { group: p.classroom.pvpOpen ? 'open' : p.classroom.id, name: p.nickname, studentId: s.userId, classroomId: p.classroom.id };
   },
 });
 
