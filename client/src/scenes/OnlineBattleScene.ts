@@ -6,7 +6,8 @@ import type { Net } from '../net/Net';
 import { updateSave } from '../save';
 import { showQuiz, type QuizResult } from '../ui/QuizPopup';
 import { sfx, type Ambience, type Track } from '../audio/Sound';
-import { ArenaScene } from './ArenaScene';
+import { track } from '../progress';
+import { ArenaScene, type AwardKind } from './ArenaScene';
 
 type Start = Extract<ServerMessage, { t: 'start' }>;
 
@@ -245,6 +246,12 @@ export class OnlineBattleScene extends ArenaScene {
       d.answers.push({ id, ok: res.correct, ms: Math.round(res.timeMs), at: Date.now() });
       if (res.correct) d.crystals++;
     });
+    track(this, { kind: 'answer', correct: res.correct });
+  }
+
+  /** Our good shots count for quests and achievements */
+  protected onAward(shooter: Combatant, kind: AwardKind) {
+    if (shooter === this.me) track(this, { kind: 'award', award: kind });
   }
 
   // ---- Hooks from ArenaScene ------------------------------------------------------------
@@ -314,6 +321,7 @@ export class OnlineBattleScene extends ArenaScene {
       levelUp = lv.levelsGained;
       d.coins += rewards.coins;
     });
+    this.time.delayedCall(900, () => track(this, { kind: 'pvp', won }));
     if (winner) {
       winner.celebrate();
       this.focusOn(winner);

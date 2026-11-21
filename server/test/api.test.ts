@@ -5,6 +5,7 @@ import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { createApi } from '../src/api';
 import { Store } from '../src/store';
+import { weekStart } from '@sciboom/shared';
 
 let server: Server;
 let store: Store;
@@ -108,6 +109,36 @@ test('students log in with classroom code + number + PIN, and keep their progres
   assert.deepEqual([q2.asked, q2.wrong], [2, 1]);
   assert.equal(stats.data.questions[0].id, 'u1-002', 'most-missed question first');
   assert.equal(stats.data.units.find((u: any) => u.unit === 1).asked, 3);
+});
+
+test('classroom leaderboard: classmates who played, with this week\'s right answers and nicknames only', async () => {
+  const s2 = await pinOf(2);
+  const token = (await call('POST', '/api/student/login', { classCode, number: 2, pin: s2.pin })).data.token;
+  assert.equal((await call('GET', '/api/student/leaderboard')).status, 401, 'needs a student login');
+  const now = Date.now();
+  const save = {
+    level: 7,
+    stars: { '1-1': 3 },
+    stats: { pvpWins: 4 },
+    achieved: ['correct-10', 'level-5'],
+    // Two right answers this week, one from long ago (not counted for the week)
+    answers: [{ id: 'u1-010', ok: true, ms: 3000, at: now - 1000 }, { id: 'u1-011', ok: true, ms: 3000, at: now - 500 }, { id: 'u1-012', ok: true, ms: 3000, at: 5000 }],
+  };
+  await call('PUT', '/api/student/save', { save }, token);
+  const board = await call('GET', '/api/student/leaderboard', undefined, token);
+  assert.equal(board.status, 200);
+  assert.equal(board.data.classroom, 'ม.1/3');
+  const me = board.data.rows.find((r: any) => r.number === 2);
+  assert.deepEqual([me.level, me.stars, me.weekCorrect, me.pvpWins, me.badges], [7, 3, 2, 4, 2]);
+  assert.ok(!board.data.rows.some((r: any) => r.number === 3), 'students who never played are not listed');
+  assert.ok(board.data.rows.every((r: any) => !('pin' in r)), 'no PINs on the leaderboard');
+});
+
+test('the week starts on Monday at midnight, Thailand time', () => {
+  // Wed 2026-11-18 10:00 in Thailand → Mon 2026-11-16 00:00 Thailand = Sun 2026-11-15 17:00 UTC
+  assert.equal(new Date(weekStart(Date.UTC(2026, 10, 18, 3))).toISOString(), '2026-11-15T17:00:00.000Z');
+  // Just after midnight Monday in Thailand is already the new week
+  assert.equal(new Date(weekStart(Date.UTC(2026, 10, 15, 17, 1))).toISOString(), '2026-11-15T17:00:00.000Z');
 });
 
 test('nicknames are checked on the server', async () => {

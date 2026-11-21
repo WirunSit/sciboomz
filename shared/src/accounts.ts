@@ -25,6 +25,34 @@ export interface StudentLogin {
   save: unknown;
 }
 
+/** One classmate on the classroom leaderboard (nicknames only: no real names are kept) */
+export interface LeaderboardRow {
+  id: string;
+  number: number;
+  nickname: string;
+  level: number;
+  stars: number;
+  /** Right answers since Monday (Thailand time) */
+  weekCorrect: number;
+  pvpWins: number;
+  badges: number;
+}
+
+export interface Leaderboard {
+  classroom: string;
+  rows: LeaderboardRow[];
+}
+
+/** Start of this week, Monday 00:00 in Thailand (UTC+7), as epoch ms */
+export function weekStart(now = Date.now()): number {
+  const OFFSET = 7 * 3600_000;
+  const thai = now + OFFSET;
+  const day = Math.floor(thai / 86_400_000);
+  // 1970-01-01 was a Thursday: (day + 3) % 7 = days since Monday
+  const monday = day - ((day + 3) % 7);
+  return monday * 86_400_000 - OFFSET;
+}
+
 export interface TeacherInfo {
   id: string;
   username: string;

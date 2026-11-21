@@ -11,3 +11,4 @@ export * from './skills';
 export * from './battle';
 export * from './protocol';
 export * from './accounts';
+export * from './quests';

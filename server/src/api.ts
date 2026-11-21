@@ -181,6 +181,12 @@ export function createApi(store: Store, opts: ApiOptions = {}) {
     return { ok: true };
   });
 
+  route('GET', '/api/student/leaderboard', async (ctx) => {
+    const id = await studentOf(ctx);
+    const profile = await store.studentProfile(id);
+    return await store.leaderboard(profile.classroom.id);
+  });
+
   route('PUT', '/api/student/nickname', async (ctx) => {
     const id = await studentOf(ctx);
     const nickname = str(ctx.body.nickname).trim();

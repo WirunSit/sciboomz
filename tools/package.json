@@ -14,6 +14,7 @@
     "playtest:accounts": "node playtest-accounts.mjs",
     "playtest:feel": "node playtest-feel.mjs",
     "playtest:maps": "node playtest-maps.mjs",
+    "playtest:progress": "node playtest-progress.mjs",
     "costumes": "node costumes.mjs"
   },
   "devDependencies": {

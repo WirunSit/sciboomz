@@ -7,6 +7,7 @@ import { addTextButton } from '../ui/TextButton';
 import { drawArtBackground } from '../game/background';
 import { logout } from '../net/account';
 import { session } from '../net/session';
+import { waitingRewards } from '../progress';
 
 export class MenuScene extends Phaser.Scene {
   constructor() {
@@ -17,7 +18,7 @@ export class MenuScene extends Phaser.Scene {
     startMusic('menu');
     drawArtBackground(this, 'backgrounds/menu_school', GAME_WIDTH, 0);
     // Soft dark band behind the buttons so they stay readable over the busy picture
-    this.add.rectangle(GAME_WIDTH / 2, 420, 560, 300, 0x1b1d3a, 0.35).setStrokeStyle(0);
+    this.add.rectangle(GAME_WIDTH / 2, 460, 560, 380, 0x1b1d3a, 0.35).setStrokeStyle(0);
 
     const logo = this.add.image(GAME_WIDTH / 2, 115, 'ui/logo');
     logo.setScale(560 / logo.width);
@@ -47,12 +48,23 @@ export class MenuScene extends Phaser.Scene {
     addTextButton(this, GAME_WIDTH / 2, 420, 'ผจญภัย (ด่านบอส)', () => this.scene.start('WorldMap'), { width: 460, color: 0x8a5cf6 });
     addTextButton(this, GAME_WIDTH / 2, 510, 'เล่นกับเพื่อน (ออนไลน์)', () => this.scene.start('Lobby'), { width: 460, color: 0x2fbf5b });
 
+    // Daily quests + badges, and the classroom leaderboard
+    const quests = addTextButton(this, GAME_WIDTH / 2 - 117, 604, 'ภารกิจ', () => this.scene.start('Quests', { from: 'Menu' }), { width: 220, height: 62, fontSize: 26, color: 0xe0559a });
+    addTextButton(this, GAME_WIDTH / 2 + 117, 604, 'อันดับในห้อง', () => this.scene.start('Leaderboard'), { width: 220, height: 62, fontSize: 24, color: 0x3a8dde });
+    const waiting = waitingRewards();
+    if (waiting > 0) {
+      // Red number: rewards ready to collect
+      const dot = this.add.circle(quests.x + 98, quests.y - 26, 17, 0xff3b30).setStrokeStyle(3, 0xffffff);
+      this.add.text(dot.x, dot.y, String(Math.min(9, waiting)), { fontFamily: FONT_FAMILY, fontSize: '20px', fontStyle: '700', color: '#ffffff', padding: { top: 4 } }).setOrigin(0.5);
+      this.tweens.add({ targets: dot, scale: 1.2, duration: 500, yoyo: true, repeat: -1 });
+    }
+
     // Phones: fullscreen hides the browser bar and gives a bigger game
     if (this.sys.game.device.input.touch) {
-      addTextButton(this, GAME_WIDTH / 2, 620, 'เต็มจอ', () => this.goFullscreen(), {
-        width: 220,
-        height: 56,
-        fontSize: 24,
+      addTextButton(this, GAME_WIDTH - 220, 40, 'เต็มจอ', () => this.goFullscreen(), {
+        width: 130,
+        height: 50,
+        fontSize: 22,
         color: 0x3a8dde,
       });
     }

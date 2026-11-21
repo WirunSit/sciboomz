@@ -1,7 +1,7 @@
 // Run with: npm test -w shared
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { MAP_STYLES, Terrain, simulateShot, blastDamage, WORLD_WIDTH } from './index';
+import { ACHIEVEMENTS, MAP_STYLES, Terrain, simulateShot, blastDamage, WORLD_WIDTH, claimAchievement, claimQuest, claimableAchievements, dailyProgress, dailyQuests, emptyStats, freshDaily, recordEvent, rewardsWaiting, type DailyState } from './index';
 
 test('same seed makes the same map', () => {
   const a = Terrain.generate(42);
@@ -503,4 +503,42 @@ test('nicknames: polite Thai/English names pass, rude ones and odd symbols do no
 test('CSV round-trips quotes, commas and new lines', () => {
   const rows = [['id', 'question'], ['u1-001', 'ข้อใด "ถูก", ไม่ใช่\nบรรทัดใหม่']];
   assert.deepEqual(parseCsv(toCsv(rows)), rows);
+});
+
+test('daily quests: same three for everyone on a day, new ones the next day, progress counts from the start of the day', () => {
+  const a = dailyQuests('2026-11-21');
+  assert.equal(a.length, 3);
+  assert.deepEqual(a, dailyQuests('2026-11-21'));
+  assert.equal(new Set(a.map((q) => q.stat)).size, 3, 'three different kinds');
+  const days = new Set(Array.from({ length: 10 }, (_, i) => dailyQuests(`2026-12-${String(i + 1).padStart(2, '0')}`).map((q) => q.id).join()));
+  assert.ok(days.size > 3, 'quests change from day to day');
+
+  const p = { stats: { ...emptyStats(), correct: 40 }, daily: undefined as unknown as DailyState, achieved: [] as string[], level: 1 };
+  p.daily = freshDaily(undefined, p.stats, '2026-11-21');
+  // Answer lots of questions and win stages: every quest about those completes exactly once
+  const done: string[] = [];
+  for (let i = 0; i < 15; i++) done.push(...recordEvent(p, { kind: 'answer', correct: true }, '2026-11-21').quests.map((q) => q.id));
+  assert.equal(new Set(done).size, done.length, 'a quest is reported complete only once');
+  const prog = dailyProgress(p.daily, p.stats);
+  for (const q of prog) if (q.quest.stat === 'correct') assert.ok(q.complete);
+  // Claim: only once, and only when complete
+  const i = prog.findIndex((q) => q.complete);
+  if (i >= 0) {
+    assert.ok(claimQuest(p, i));
+    assert.equal(claimQuest(p, i), null);
+  }
+  // A new day starts new quests
+  p.daily = freshDaily(p.daily, p.stats, '2026-11-22');
+  assert.equal(p.daily.day, '2026-11-22');
+  assert.ok(dailyProgress(p.daily, p.stats).every((q) => !q.claimed && q.done === 0));
+});
+
+test('achievements: reached tiers can be claimed once; there is always a next tier', () => {
+  const p = { stats: emptyStats(), daily: freshDaily(undefined, emptyStats()), achieved: [] as string[], level: 1 };
+  const r = recordEvent(p, { kind: 'stage', won: true, stars: 3, boss: true, hard: false });
+  assert.ok(r.achievements.some((a) => a.id === 'bossWins-1'), 'first boss achievement');
+  assert.deepEqual(claimAchievement(p, 'bossWins-1'), { coins: 100 });
+  assert.equal(claimAchievement(p, 'bossWins-1'), null);
+  assert.ok(ACHIEVEMENTS.some((a) => a.stat === 'bossWins' && a.target > 1), 'a next tier exists');
+  assert.equal(rewardsWaiting(p), claimableAchievements(p.stats, p.level, p.achieved).length + dailyProgress(p.daily, p.stats).filter((q) => q.complete && !q.claimed).length);
 });

@@ -8,6 +8,8 @@ import {
   defaultNickname,
   parseCsv,
   toCsv,
+  weekStart,
+  type Leaderboard,
   type ClassroomInfo,
   type Question,
   type QuestionUnit,
@@ -303,6 +305,42 @@ export class Store {
         lastSeen: Number(r.last_seen),
       };
     });
+  }
+
+  /** Classmates ranked by this week's right answers, level, stars, PvP wins and badges */
+  async leaderboard(classroomId: string): Promise<Leaderboard> {
+    const room = await this.classroom(classroomId);
+    const rows = await this.db.all<StudentRow>('SELECT * FROM students WHERE classroom_id = ? ORDER BY number', [classroomId]);
+    const week = await this.db.all<{ student_id: string; n: number }>(
+      `SELECT a.student_id, SUM(a.ok) AS n FROM answers a
+       JOIN students s ON s.id = a.student_id WHERE s.classroom_id = ? AND a.at >= ? GROUP BY a.student_id`,
+      [classroomId, weekStart()],
+    );
+    const weekBy = new Map(week.map((w) => [w.student_id, Number(w.n) || 0]));
+    return {
+      classroom: room?.name ?? '',
+      rows: rows
+        // Only students who have played (saved progress at least once)
+        .filter((r) => r.save)
+        .map((r) => {
+          let save: { level?: number; stars?: Record<string, number>; stats?: { pvpWins?: number }; achieved?: unknown[] } = {};
+          try {
+            save = JSON.parse(r.save!);
+          } catch {
+            // unreadable save: zeros
+          }
+          return {
+            id: r.id,
+            number: r.number,
+            nickname: r.nickname || defaultNickname(r.number),
+            level: Number(save.level) || 1,
+            stars: Object.values(save.stars ?? {}).reduce((a, b) => a + (Number(b) || 0), 0),
+            weekCorrect: weekBy.get(r.id) ?? 0,
+            pvpWins: Number(save.stats?.pvpWins) || 0,
+            badges: Array.isArray(save.achieved) ? save.achieved.length : 0,
+          };
+        }),
+    };
   }
 
   /** The student's classroom id, only if the teacher owns it */

@@ -22,13 +22,16 @@ type WorldLock = 'open' | 'teacher' | 'previous';
 /** Pick a world (tabs) and one of its three stages; choose boy/girl */
 export class WorldMapScene extends Phaser.Scene {
   private world = 1;
+  /** Showing the hard versions of this world's stages */
+  private hard = false;
 
   constructor() {
     super('WorldMap');
   }
 
-  init(data: { world?: number }) {
+  init(data: { world?: number; hard?: boolean }) {
     const stars = loadSave().stars;
+    this.hard = !!data.hard;
     // Default: the furthest world the player can play
     const playable = WORLDS.filter((w) => this.lockOf(w, stars) === 'open').map((w) => w.id);
     this.world = data.world ?? playable[playable.length - 1] ?? 1;
@@ -61,7 +64,7 @@ export class WorldMapScene extends Phaser.Scene {
 
     this.characterPicker(save.character);
     this.tabs(save.stars);
-    this.worldCard(w, save.stars);
+    this.worldCard(w, save.stars, save.hardStars);
 
     addTextButton(this, GAME_WIDTH - 410, GAME_HEIGHT - 48, 'ห้องแต่งตัว', () => this.scene.start('Wardrobe', { from: 'WorldMap' }), {
       width: 240,
@@ -93,7 +96,7 @@ export class WorldMapScene extends Phaser.Scene {
       img.setScale(84 / img.height);
       ring.setInteractive({ useHandCursor: true }).on('pointerup', () => {
         updateSave((d) => (d.character = c));
-        this.scene.restart({ world: this.world });
+        this.scene.restart({ world: this.world, hard: this.hard });
       });
     });
   }
@@ -116,12 +119,12 @@ export class WorldMapScene extends Phaser.Scene {
       this.add.text(x + 26, y - 18, w.title, text(24)).setOrigin(0.5);
       this.add.text(x + 26, y + 16, lock === 'open' ? `ดาว ${got}/9` : lock === 'teacher' ? 'ครูยังไม่เปิด' : 'ยังล็อกอยู่', text(17, lock === 'open' ? '#ffcc33' : '#bbbbcc')).setOrigin(0.5);
       const hit = this.add.zone(x - tabW / 2, y - 44, tabW, 88).setOrigin(0).setInteractive({ useHandCursor: true });
-      hit.on('pointerup', () => this.scene.restart({ world: w.id }));
+      hit.on('pointerup', () => this.scene.restart({ world: w.id, hard: false }));
     });
   }
 
   /** The selected world's three stages connected by a path */
-  private worldCard(w: WorldConfig, stars: Record<string, number>) {
+  private worldCard(w: WorldConfig, stars: Record<string, number>, hardStars: Record<string, number>) {
     const top = 214;
     const card = this.add.graphics();
     card.fillStyle(0x1b1d3a, 0.75).fillRoundedRect(60, top, GAME_WIDTH - 120, 384, 26);
@@ -129,6 +132,24 @@ export class WorldMapScene extends Phaser.Scene {
     this.add.text(100, top + 34, `${w.title}: ${w.unitTitle}`, text(30, '#ffcc33')).setOrigin(0, 0.5);
 
     const lock = this.lockOf(w, stars);
+    // Hard mode opens once this world's boss is beaten
+    const hardOpen = lock === 'open' && (stars[`${w.id}-3`] ?? 0) > 0;
+    const hard = this.hard && hardOpen;
+    if (hardOpen) {
+      (['ปกติ', 'ยาก'] as const).forEach((label, i) => {
+        const on = hard === (i === 1);
+        addTextButton(this, GAME_WIDTH - 300 + i * 150, top + 36, label, () => this.scene.restart({ world: this.world, hard: i === 1 }), {
+          width: 140,
+          height: 48,
+          fontSize: 22,
+          color: on ? (i === 1 ? 0xe0412b : 0xff8a1f) : 0x4a4f75,
+        });
+      });
+      if (hard) this.add.text(GAME_WIDTH - 470, top + 36, 'ศัตรูอึดและแม่นขึ้น รางวัล x1.6', text(17, '#ffb0a0')).setOrigin(1, 0.5);
+    } else if (lock === 'open') {
+      this.add.text(GAME_WIDTH - 100, top + 36, 'ปราบบอสโลกนี้เพื่อเปิดโหมดยาก', text(17, '#bbbbcc')).setOrigin(1, 0.5);
+    }
+    const best = hard ? hardStars : stars;
     const stages = STAGES.filter((s) => s.world === w.id);
     const xs = [300, 620, 960];
     const y = top + 220;
@@ -138,16 +159,16 @@ export class WorldMapScene extends Phaser.Scene {
 
     stages.forEach((s, i) => {
       const x = xs[i];
-      const open = lock === 'open' && isUnlocked(s.id, stars);
+      const open = lock === 'open' && (hard || isUnlocked(s.id, stars));
       const icon = this.add.image(x, y + 50, s.enemy.texture).setOrigin(0.5, 1);
       icon.setScale(Math.min((s.isBoss ? 150 : 100) / icon.height, (s.isBoss ? 190 : 130) / icon.width));
       if (!open) icon.setAlpha(0.3);
 
-      const badge = this.add.circle(x, y + 70, 30, open ? 0xff8a1f : 0x666677).setStrokeStyle(4, 0x1b1d3a);
+      const badge = this.add.circle(x, y + 70, 30, open ? (hard ? 0xe0412b : 0xff8a1f) : 0x666677).setStrokeStyle(4, 0x1b1d3a);
       this.add.text(x, y + 70, s.id, text(20)).setOrigin(0.5);
       this.add.text(x, y + 118, open ? s.title : 'ยังล็อกอยู่', text(19, open ? '#ffffff' : '#aaaaaa')).setOrigin(0.5);
 
-      const got = stars[s.id] ?? 0;
+      const got = best[s.id] ?? 0;
       for (let k = 0; k < 3; k++) {
         const st = this.add.image(x + (k - 1) * 30, y - (s.isBoss ? 112 : 64), 'ui/star');
         st.setScale(26 / st.height).setAlpha(k < got ? 1 : 0.25);
@@ -155,7 +176,7 @@ export class WorldMapScene extends Phaser.Scene {
 
       if (open) {
         for (const o of [icon, badge]) {
-          o.setInteractive({ useHandCursor: true }).on('pointerup', () => this.scene.start('Stage', { stageId: s.id }));
+          o.setInteractive({ useHandCursor: true }).on('pointerup', () => this.scene.start('Stage', { stageId: s.id, hard }));
         }
         this.tweens.add({ targets: icon, y: icon.y - 8, duration: 700 + i * 120, yoyo: true, repeat: -1, ease: 'Sine.inOut' });
       }

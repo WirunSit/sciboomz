@@ -603,8 +603,8 @@ export abstract class ArenaScene extends Phaser.Scene {
    * A whole human turn with skills: walk/aim/charge, then fire using the shot
    * skills picked (+1 and +2 fire more rounds with the same aim).
    */
-  protected async humanShot(f: Fighter, opts: ShotOptions = {}): Promise<ShotOutcome[]> {
-    const power = await this.humanTurn(f);
+  protected async humanShot(f: Fighter, opts: ShotOptions = {}, seconds = TURN_SECONDS): Promise<ShotOutcome[]> {
+    const power = await this.humanTurn(f, seconds);
     if (power === null) return [];
     const sk = this.skills.get(f);
     const loadout = sk ? fireSkills(sk) : loadoutOf([]);

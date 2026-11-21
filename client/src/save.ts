@@ -2,7 +2,7 @@
 // logged in, also on the server (so it follows them to any computer and the
 // teacher sees their answers). Without an account it stays on this device.
 // Every read/write is wrapped: private windows or blocked storage must not break the game.
-import { EMPTY_OUTFIT, sanitizeOutfit, type Character, type Outfit, type WeaponItem } from '@sciboom/shared';
+import { EMPTY_OUTFIT, emptyStats, freshDaily, sanitizeOutfit, type Character, type DailyState, type Outfit, type PlayerStats, type WeaponItem } from '@sciboom/shared';
 import { api } from './net/api';
 import { isStudent, session } from './net/session';
 
@@ -35,6 +35,16 @@ export interface SaveData {
   outfit: Outfit;
   /** Recent answers (the server files them for the teacher's statistics) */
   answers: AnswerRecord[];
+  /** Best stars per stage cleared in hard mode */
+  hardStars: Record<string, number>;
+  /** Lifetime counters (daily quests and achievements are worked out from these) */
+  stats: PlayerStats;
+  /** Today's quests */
+  daily: DailyState;
+  /** Achievements whose reward has been collected */
+  achieved: string[];
+  /** Finished the how-to-play tips in the first stage */
+  tutorialDone: boolean;
 }
 
 const GUEST_KEY = 'sciboom.save.v1';
@@ -45,7 +55,39 @@ const SYNC_DELAY_MS = 1500;
 const STARTER: WeaponItem = { uid: 'starter', id: 'starter_cannon', rarity: 1, level: 1 };
 
 function fresh(): SaveData {
-  return { nickname: '', character: 'boy', stars: {}, crystals: 0, coins: 0, level: 1, exp: 0, weapons: [{ ...STARTER }], equipped: STARTER.uid, outfit: { ...EMPTY_OUTFIT }, answers: [] };
+  const stats = emptyStats();
+  return {
+    nickname: '',
+    character: 'boy',
+    stars: {},
+    crystals: 0,
+    coins: 0,
+    level: 1,
+    exp: 0,
+    weapons: [{ ...STARTER }],
+    equipped: STARTER.uid,
+    outfit: { ...EMPTY_OUTFIT },
+    answers: [],
+    hardStars: {},
+    stats,
+    daily: freshDaily(undefined, stats),
+    achieved: [],
+    tutorialDone: false,
+  };
+}
+
+/**
+ * Saves from before achievements existed: start the counters from what the
+ * save already shows (answers kept, stages cleared), so old progress counts.
+ */
+function statsFromHistory(d: SaveData): PlayerStats {
+  const stats = emptyStats();
+  stats.correct = d.answers.filter((a) => a.ok).length;
+  const cleared = Object.entries(d.stars ?? {}).filter(([, n]) => n > 0);
+  stats.stageWins = cleared.length;
+  stats.bossWins = cleared.filter(([id]) => id.endsWith('-3')).length;
+  stats.threeStars = cleared.filter(([, n]) => n >= 3).length;
+  return stats;
 }
 
 /** Fix up saves from older versions or hand-edited storage */
@@ -54,7 +96,20 @@ function repair(d: SaveData): SaveData {
   if (!d.weapons.some((w) => w.uid === d.equipped)) d.equipped = d.weapons[0].uid;
   if (!Array.isArray(d.answers)) d.answers = [];
   d.outfit = sanitizeOutfit(d.outfit, d.level);
+  if (!d.hardStars || typeof d.hardStars !== 'object') d.hardStars = {};
+  if (!d.stats || typeof d.stats !== 'object') d.stats = statsFromHistory(d);
+  else d.stats = { ...emptyStats(), ...d.stats };
+  if (!Array.isArray(d.achieved)) d.achieved = [];
+  d.daily = freshDaily(d.daily, d.stats);
+  // Anyone who has already cleared a stage knows how to play
+  if (typeof d.tutorialDone !== 'boolean') d.tutorialDone = Object.keys(d.stars ?? {}).length > 0;
   return d;
+}
+
+/** A fresh save minus the fields repair() works out from an older save's history */
+function withoutProgress(d: SaveData): Partial<SaveData> {
+  const { stats: _s, daily: _d, tutorialDone: _t, ...rest } = d;
+  return rest;
 }
 
 /** Each student account has its own copy on the device, separate from the guest's */
@@ -79,7 +134,8 @@ export function loadSave(): SaveData {
   try {
     const raw = localStorage.getItem(storageKey());
     if (!raw) return fresh();
-    return repair({ ...fresh(), ...(JSON.parse(raw) as Partial<SaveData>) });
+    // Fields missing from older saves are left out (not defaulted) so repair() can rebuild them from history
+    return repair({ ...withoutProgress(fresh()), ...(JSON.parse(raw) as Partial<SaveData>) } as SaveData);
   } catch {
     return fresh();
   }
@@ -157,7 +213,7 @@ export async function reconcileSave(serverSave: unknown) {
     await syncSave();
     return;
   }
-  writeSave(serverSave && typeof serverSave === 'object' ? repair({ ...fresh(), ...(serverSave as Partial<SaveData>) }) : fresh());
+  writeSave(serverSave && typeof serverSave === 'object' ? repair({ ...withoutProgress(fresh()), ...(serverSave as Partial<SaveData>) } as SaveData) : fresh());
 }
 
 // Leaving the page: last chance to upload progress

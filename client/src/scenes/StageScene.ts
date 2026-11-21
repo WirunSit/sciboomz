@@ -30,8 +30,11 @@ import { UNITS } from '../game/questionBank';
 import { STAGES, nextStage, stageById, type StageConfig } from '../game/stages';
 import { equippedWeapon, loadSave, newUid, updateSave } from '../save';
 import { showQuiz } from '../ui/QuizPopup';
+import { Coach, type Tip } from '../ui/Coach';
+import { aimMode } from '../settings';
 import { RARITY_COLORS, addStars } from '../ui/rarity';
-import { ArenaScene } from './ArenaScene';
+import { track } from '../progress';
+import { ArenaScene, type AwardKind } from './ArenaScene';
 
 /** Power-ups from mystery crates (one per right answer; they add up) */
 type Item = 'heal' | 'shield' | 'double' | 'power' | 'gauge';
@@ -47,6 +50,13 @@ const MAX_CRATES = 3;
 /** Power-up bonus per crate, and the most it can add up to */
 const CRATE_POWER = 0.3;
 const MAX_DAMAGE_MUL = 1.9;
+/** Hard mode (open once a world's boss is beaten): tougher, sharper enemies, bigger rewards */
+const HARD_HP = 1.5;
+const HARD_SKILL = 0.15;
+const HARD_REWARD = 1.6;
+/** New players get how-to-play tips during their first turns, with more time to read */
+const TUTORIAL_TURNS = 3;
+const TUTORIAL_SECONDS = 45;
 
 /** Single-player stage: the student vs a minion or boss, with science questions. */
 export class StageScene extends ArenaScene {
@@ -80,8 +90,16 @@ export class StageScene extends ArenaScene {
     super('Stage');
   }
 
-  init(data: { stageId?: string }) {
-    this.stage = stageById(data.stageId ?? '') ?? STAGES[0];
+  /** Playing the hard version of the stage */
+  private hard = false;
+  /** How-to-play tips (first stage of a new player) */
+  private coach!: Coach;
+  private tutorialTurn = -1;
+
+  init(data: { stageId?: string; hard?: boolean }) {
+    this.hard = !!data.hard;
+    const base = stageById(data.stageId ?? '') ?? STAGES[0];
+    this.stage = this.hard ? hardVersion(base) : base;
   }
 
   create() {
@@ -122,13 +140,15 @@ export class StageScene extends ArenaScene {
     for (let i = 0; i < Math.min(this.stage.crates, MAX_CRATES); i++) this.spawnCrate();
     if (this.stage.gimmick === 'lava') this.drawLava(WORLD_HEIGHT - 70);
     this.updateStatus();
+    this.coach = new Coach(this);
+    this.tutorialTurn = save.tutorialDone ? -1 : 0;
 
     this.intro().then(() => this.runMatch());
   }
 
   private async intro() {
     this.focusOn(this.enemy);
-    this.hud.banner(`ด่าน ${this.stage.id}: ${this.stage.title}`, this.stage.isBoss ? '#ff8866' : '#ffffff');
+    this.hud.banner(`ด่าน ${this.stage.id}${this.hard ? ' (ยาก)' : ''}: ${this.stage.title}`, this.stage.isBoss || this.hard ? '#ff8866' : '#ffffff');
     await this.wait(1700);
   }
 
@@ -175,7 +195,10 @@ export class StageScene extends ArenaScene {
         this.hud.banner('ลมเปลี่ยนทิศ!', '#bfe8ff');
       });
     }
-    const shots = await this.humanShot(this.player, { damageMul: this.damageMul });
+    const tutorial = this.tutorialTurn >= 0 && this.tutorialTurn < TUTORIAL_TURNS;
+    if (tutorial) void this.tips(this.tutorialTurn);
+    const shots = await this.humanShot(this.player, { damageMul: this.damageMul }, tutorial ? TUTORIAL_SECONDS : undefined);
+    if (tutorial) this.endTutorialTurn();
     this.stormTimer?.remove();
     if (shots.length > 0) {
       this.damageMul = 1;
@@ -192,6 +215,63 @@ export class StageScene extends ArenaScene {
     await this.openPendingCrates();
     await this.checkSplit();
     await this.wait(300);
+  }
+
+  // ---- How to play (first turns of a new player) ------------------------------
+
+  /** Tips for the player's first turns, one after another while they play */
+  private async tips(turn: number) {
+    // Started just before the turn: let it begin first
+    await this.wait(400);
+    const drag = aimMode() === 'drag';
+    const list: { tip: Tip; doneWhen?: () => boolean }[] = [];
+    if (turn === 0) {
+      const angle = this.player.angle;
+      if (drag) {
+        list.push({ tip: { text: 'กดค้างที่ปุ่มสีส้ม "ลากยิง" แล้วดึงถอยหลัง ยิ่งดึงไกลยิ่งแรง ปล่อยนิ้วเพื่อยิง', x: this.player.facing === 1 ? 210 : GAME_WIDTH - 210, y: 300 } });
+      } else {
+        list.push({ tip: { text: 'กดปุ่มลูกศรขึ้น-ลง เพื่อปรับมุมยิง (บนคอมใช้ปุ่ม ↑ ↓ ได้)', x: GAME_WIDTH - 280, y: 650 }, doneWhen: () => Math.abs(this.player.angle - angle) > 3 });
+        list.push({ tip: { text: 'กดค้างปุ่ม "ยิง!" แล้วปล่อย ยิ่งกดนานยิ่งแรง จุดประบอกว่ากระสุนจะไปทางไหน', x: GAME_WIDTH - 95, y: 640 } });
+      }
+    } else if (turn === 1) {
+      const crate = this.crates.find((c) => !c.opened);
+      const cam = this.cameras.main;
+      const at = crate ? { x: (crate.x - cam.worldView.x) * cam.zoom, y: (crate.y - cam.worldView.y) * cam.zoom } : { x: GAME_WIDTH / 2, y: 300 };
+      list.push({ tip: { text: 'ยิงให้กระสุนผ่านกล่อง "?" กลางอากาศ จบตาจะได้คำถาม ตอบถูกได้พลังพิเศษ', x: Phaser.Math.Clamp(at.x, 60, GAME_WIDTH - 60), y: Phaser.Math.Clamp(at.y, 200, 520) } });
+      list.push({ tip: { text: 'ลูกศรด้านบนคือลม ลมพัดกระสุนไปตามทิศลูกศร ตัวเลขยิ่งมากยิ่งพัดแรง', x: GAME_WIDTH / 2, y: 100 } });
+    } else {
+      list.push({ tip: { text: 'ทุกตามีสตามินา 100 ใช้เดินหรือกดสกิลก็ได้ เช่น +1 ยิงเพิ่มอีกนัด (ตัวเลขมุมปุ่มคือสตามินาที่ใช้)', x: 352, y: 562 } });
+      list.push({ tip: { text: 'ตอบคำถามถูกและยิงโดน เกจไม้ตายจะเพิ่ม เต็มเมื่อไรกดปุ่มนี้ ยิงลูกใหญ่แรง x2', x: 672, y: 562 } });
+    }
+    for (const step of list) {
+      if (!this.coachTurnOpen()) return;
+      const shown = this.coach.show(step.tip);
+      // Doing the thing (or the turn ending) closes the tip too
+      const watch = this.time.addEvent({
+        delay: 120,
+        loop: true,
+        callback: () => {
+          if (!this.coachTurnOpen() || step.doneWhen?.()) this.coach.close();
+        },
+      });
+      await shown;
+      watch.remove();
+    }
+  }
+
+  private coachTurnOpen(): boolean {
+    return this.phase === 'aiming' || this.phase === 'charging';
+  }
+
+  private endTutorialTurn() {
+    this.coach.close();
+    this.tutorialTurn++;
+    if (this.tutorialTurn >= TUTORIAL_TURNS) this.finishTutorial();
+  }
+
+  private finishTutorial() {
+    this.tutorialTurn = -1;
+    updateSave((d) => (d.tutorialDone = true));
   }
 
   private async enemyTurn() {
@@ -426,6 +506,7 @@ export class StageScene extends ArenaScene {
       d.answers.push({ id: item.question.id, ok: res.correct, ms: Math.round(res.timeMs), at: Date.now() });
       if (res.correct) d.crystals++;
     });
+    track(this, { kind: 'answer', correct: res.correct });
     this.updateStatus();
     return res.correct;
   }
@@ -512,6 +593,11 @@ export class StageScene extends ArenaScene {
     for (const c of this.crates) if (c.touchedBy(a, b)) this.collectCrate(c);
   }
 
+  /** The player's good shots count for quests and achievements */
+  protected onAward(shooter: Combatant, kind: AwardKind) {
+    if (shooter === this.player) track(this, { kind: 'award', award: kind });
+  }
+
   /** A blast right next to a crate collects it too */
   protected onExplosion(at: Vec, radius: number, shooter: Combatant) {
     if (shooter !== this.player) return;
@@ -523,6 +609,7 @@ export class StageScene extends ArenaScene {
   private collectCrate(c: Crate) {
     c.open();
     sfx.crate();
+    track(this, { kind: 'crate' });
     this.pendingCrates++;
     this.floatText(c.x, c.centerY - 30, '?', '#ffdd33');
   }
@@ -561,14 +648,18 @@ export class StageScene extends ArenaScene {
 
   protected onMatchEnd(winner: Combatant | null) {
     const won = winner === this.player;
+    this.coach.close();
+    // Played a whole stage: the basics are known now
+    if (this.tutorialTurn > 0) this.finishTutorial();
     const { asked, correct, crystals } = this.stats;
-    const restart = () => this.scene.restart({ stageId: this.stage.id });
+    const restart = () => this.scene.restart({ stageId: this.stage.id, hard: this.hard });
     const toMap = () => this.scene.start('WorldMap');
     const hpFrac = this.player.hp / this.player.maxHp;
     const stars = won ? (hpFrac >= 0.6 ? 3 : hpFrac >= 0.3 ? 2 : 1) : 0;
 
     // Rewards: EXP + coins always (right answers count even when losing), weapon drop on a win
-    const rewards = stageRewards({ won, stars, correct, isBoss: !!this.stage.isBoss });
+    const plain = stageRewards({ won, stars, correct, isBoss: !!this.stage.isBoss });
+    const rewards = this.hard ? { exp: Math.round(plain.exp * HARD_REWARD), coins: Math.round(plain.coins * HARD_REWARD) } : plain;
     const drop = won ? rollDrop(this.stage.drops, this.rng) : null;
     let levelsGained = 0;
     const saved = updateSave((d) => {
@@ -577,7 +668,8 @@ export class StageScene extends ArenaScene {
       d.exp = lv.exp;
       levelsGained = lv.levelsGained;
       d.coins += rewards.coins;
-      if (won) d.stars[this.stage.id] = Math.max(d.stars[this.stage.id] ?? 0, stars);
+      const best = this.hard ? d.hardStars : d.stars;
+      if (won) best[this.stage.id] = Math.max(best[this.stage.id] ?? 0, stars);
       if (drop) d.weapons.push({ uid: newUid(), id: drop.id, rarity: drop.rarity, level: 1 });
     });
     const rewardLines = [`EXP +${rewards.exp} · เหรียญ +${rewards.coins} · ผลึกความรู้ +${crystals}`];
@@ -591,6 +683,7 @@ export class StageScene extends ArenaScene {
     const wardrobeButton = { label: 'ห้องแต่งตัว', onClick: () => this.scene.start('Wardrobe', { from: 'WorldMap' }), color: 0xe0559a };
 
     if (levelsGained > 0) this.time.delayedCall(1200, () => sfx.levelUp());
+    this.time.delayedCall(900, () => track(this, { kind: 'stage', won, stars, boss: !!this.stage.isBoss, hard: this.hard }));
     if (!won) {
       sfx.lose();
       this.enemy.celebrate();
@@ -613,13 +706,13 @@ export class StageScene extends ArenaScene {
     this.focusOn(this.player);
     const next = nextStage(this.stage.id);
     const buttons = [];
-    if (next) buttons.push({ label: 'ด่านต่อไป', onClick: () => this.scene.start('Stage', { stageId: next.id }) });
+    if (next) buttons.push({ label: 'ด่านต่อไป', onClick: () => this.scene.start('Stage', { stageId: next.id, hard: this.hard && next.world === this.stage.world }) });
     buttons.push({ label: 'เล่นอีกครั้ง', onClick: restart, color: next ? 0x8a5cf6 : undefined });
     buttons.push({ label: 'คลังอาวุธ', onClick: () => this.scene.start('Inventory'), color: 0x2fbf5b });
     if (unlocked.length > 0) buttons.push(wardrobeButton);
     buttons.push({ label: 'แผนที่', onClick: toMap, color: 0x3a8dde });
     // First line left empty: the star images go there
-    this.showResult(this.stage.isBoss ? 'ปราบบอสสำเร็จ!' : 'ผ่านด่าน!', ['', `ตอบถูก ${correct}/${asked} ข้อ`, ...rewardLines], buttons);
+    this.showResult((this.stage.isBoss ? 'ปราบบอสสำเร็จ!' : 'ผ่านด่าน!') + (this.hard ? ' (ยาก)' : ''), ['', `ตอบถูก ${correct}/${asked} ข้อ`, ...rewardLines], buttons);
     for (let i = 0; i < 3; i++) {
       const star = this.add.image(GAME_WIDTH / 2 + (i - 1) * 64, 242, 'ui/star').setScrollFactor(0).setDepth(DEPTH.overlay);
       const size = 46 / star.height;
@@ -649,4 +742,18 @@ export class StageScene extends ArenaScene {
     for (const p of parts) (p as unknown as Phaser.GameObjects.Components.ScrollFactor & Phaser.GameObjects.Components.Depth).setScrollFactor(0).setDepth(DEPTH.overlay);
     this.tweens.add({ targets: parts, alpha: { from: 0, to: 1 }, duration: 500, delay: 1100 });
   }
+}
+
+/** The same stage, tougher: more health, sharper aim, better drops */
+function hardVersion(s: StageConfig): StageConfig {
+  const tougher = (e: StageConfig['enemy']) => ({ ...e, hp: Math.round(e.hp * HARD_HP), skill: Math.min(0.95, e.skill + HARD_SKILL) });
+  return {
+    ...s,
+    enemy: tougher(s.enemy),
+    splitInto: s.splitInto && tougher(s.splitInto),
+    ultimateEvery: s.ultimateEvery || 4,
+    ultimate: s.ultimate ?? { weapon: s.enemy.weapon, shots: 2, name: 'ยิงคู่' },
+    maxDifficulty: 3,
+    drops: { ...s.drops, chance: Math.min(1, s.drops.chance + 0.25) },
+  };
 }
