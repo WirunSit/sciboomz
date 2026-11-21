@@ -23,9 +23,18 @@ class RawReply {
   ) {}
 }
 
+/** The classroom tournaments (run by the PvP lobby) */
+export interface TournamentControl {
+  tournamentView(classroomId: string): unknown;
+  openTournament(classroomId: string, quizDuel: boolean): unknown;
+  startTournament(classroomId: string): string | null;
+  cancelTournament(classroomId: string): void;
+}
+
 export interface ApiOptions {
   /** If set, teachers need this code to make an account (stops strangers signing up) */
   teacherSignupCode?: string;
+  tournaments?: TournamentControl;
 }
 
 const MAX_BODY = 2_000_000;
@@ -102,6 +111,35 @@ export function createApi(store: Store, opts: ApiOptions = {}) {
       pvpOpen: typeof b.pvpOpen === 'boolean' ? b.pvpOpen : undefined,
     });
     return { classroom: await store.ownedClassroom(t, c.id) };
+  });
+
+  // ---- Classroom tournament ----------------------------------------------------------------
+  const tournaments = () => {
+    if (!opts.tournaments) throw new HttpError(503, 'ทัวร์นาเมนต์ใช้ไม่ได้บนเซิร์ฟเวอร์นี้');
+    return opts.tournaments;
+  };
+
+  route('GET', '/api/teacher/classrooms/:id/tournament', async (ctx) => {
+    const c = await store.ownedClassroom(await teacherOf(ctx), ctx.params[0]);
+    return { tournament: tournaments().tournamentView(c.id) };
+  });
+
+  route('POST', '/api/teacher/classrooms/:id/tournament', async (ctx) => {
+    const c = await store.ownedClassroom(await teacherOf(ctx), ctx.params[0]);
+    return { tournament: tournaments().openTournament(c.id, ctx.body.quizDuel === true) };
+  });
+
+  route('POST', '/api/teacher/classrooms/:id/tournament/start', async (ctx) => {
+    const c = await store.ownedClassroom(await teacherOf(ctx), ctx.params[0]);
+    const problem = tournaments().startTournament(c.id);
+    if (problem) throw new HttpError(400, problem);
+    return { tournament: tournaments().tournamentView(c.id) };
+  });
+
+  route('DELETE', '/api/teacher/classrooms/:id/tournament', async (ctx) => {
+    const c = await store.ownedClassroom(await teacherOf(ctx), ctx.params[0]);
+    tournaments().cancelTournament(c.id);
+    return { tournament: null };
   });
 
   route('DELETE', '/api/teacher/classrooms/:id', async (ctx) => {

@@ -127,7 +127,8 @@ export class OnlineBattleScene extends ArenaScene {
       if (!this.over) this.finish(null, 'การเชื่อมต่อหลุด', null);
     };
     this.addEmoteButton();
-    if (this.boss) this.hud.banner(`ร่วมกันปราบ ${this.boss.name}!`, '#ffcc33');
+    if (s.label) this.hud.banner(s.label, '#ffcc33');
+    else if (this.boss) this.hud.banner(`ร่วมกันปราบ ${this.boss.name}!`, '#ffcc33');
     else if (this.mode === 'team') this.hud.banner(`${MODE_NAMES.team}: ล้มทีมตรงข้ามให้หมด!`, '#ffcc33');
     else this.hud.banner(`เจอกับ ${this.them?.name ?? 'เพื่อน'}!`, '#ffcc33');
     void this.loop();
@@ -525,7 +526,12 @@ export class OnlineBattleScene extends ArenaScene {
     if (levelUp > 0) lines.push(`เลเวลอัป! ตอนนี้ Lv ${saved.level}`);
     if (this.endReason) lines.unshift(this.endReason);
     // A rematch needs everyone still here
-    const canRematch = this.net.isOpen && !this.endReason;
+    // A tournament match has no rematch: the winner goes on in the bracket
+    const canRematch = this.net.isOpen && !this.endReason && !this.startMsg.label;
+    if (this.startMsg.label) {
+      const final = this.startMsg.label.includes('ชิงชนะเลิศ');
+      lines.push(won ? (final ? 'คุณคือแชมป์ทัวร์นาเมนต์!' : 'ผ่านเข้ารอบต่อไป! กลับห้องรอเพื่อรอคู่ถัดไป') : 'จบการแข่งขันของคุณแล้ว ดูผลบนจอของครูได้');
+    }
     const buttons = [];
     if (canRematch) {
       buttons.push({

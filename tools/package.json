@@ -16,6 +16,7 @@
     "playtest:maps": "node playtest-maps.mjs",
     "playtest:progress": "node playtest-progress.mjs",
     "playtest:team": "node playtest-team.mjs",
+    "playtest:tournament": "node playtest-tournament.mjs",
     "costumes": "node costumes.mjs"
   },
   "devDependencies": {

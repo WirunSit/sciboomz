@@ -24,7 +24,6 @@ const store = await Store.open(process.env.DATABASE_URL ?? join(ROOT, 'server', 
   console.error(explainDbError(err, process.env.DATABASE_URL));
   process.exit(1);
 });
-const api = createApi(store, { teacherSignupCode: process.env.TEACHER_SIGNUP_CODE || undefined });
 
 const lobby = new Lobby({
   // Quiz Duel uses the same bank teachers edit (enabled questions only)
@@ -39,6 +38,8 @@ const lobby = new Lobby({
     return { group: p.classroom.pvpOpen ? 'open' : p.classroom.id, name: p.nickname, studentId: s.userId, classroomId: p.classroom.id };
   },
 });
+// The teacher pages run classroom tournaments through the lobby
+const api = createApi(store, { teacherSignupCode: process.env.TEACHER_SIGNUP_CODE || undefined, tournaments: lobby });
 
 const TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',

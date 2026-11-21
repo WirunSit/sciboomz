@@ -1,6 +1,6 @@
 import * as Phaser from 'phaser';
 import { startMusic } from '../audio/Sound';
-import { MODE_NAMES, ROOM_CODE_LENGTH, ROOM_MODES, nicknameProblem, weaponDef, type RoomMode, type RoomSummary, type ServerMessage } from '@sciboom/shared';
+import { MODE_NAMES, ROOM_CODE_LENGTH, ROOM_MODES, nicknameProblem, weaponDef, type RoomMode, type RoomSummary, type ServerMessage, type TourneyStudentView } from '@sciboom/shared';
 import { FONT_FAMILY, GAME_HEIGHT, GAME_WIDTH, TEXT_STROKE } from '../config';
 import { drawArtBackground } from '../game/background';
 import { Net } from '../net/Net';
@@ -46,6 +46,9 @@ export class LobbyScene extends Phaser.Scene {
   private joinRoom: ((code: string) => void) | null = null;
   /** Code of the room we're waiting in (null: choosing) */
   private waitingCode: string | null = null;
+  /** The classroom tournament strip (stays while the panels change) */
+  private tourney: TourneyStudentView | null = null;
+  private tourneyItems: Phaser.GameObjects.GameObject[] = [];
 
   constructor() {
     super('Lobby');
@@ -60,10 +63,12 @@ export class LobbyScene extends Phaser.Scene {
     this.listItems = [];
     this.listShown = false;
     this.waitingCode = null;
+    this.tourney = null;
+    this.tourneyItems = [];
     drawArtBackground(this, 'backgrounds/pvp_arena', GAME_WIDTH, 0);
     this.add.rectangle(0, 0, GAME_WIDTH, GAME_HEIGHT, 0x0b0c1f, 0.55).setOrigin(0);
     this.add.text(GAME_WIDTH / 2, 50, 'เล่นกับเพื่อน (ออนไลน์)', text(40, '#ffcc33')).setOrigin(0.5);
-    this.status = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT - 110, 'กำลังเชื่อมต่อ...', text(22, '#bfe8ff')).setOrigin(0.5);
+    this.status = this.add.text(GAME_WIDTH / 2 + 60, GAME_HEIGHT - 44, 'กำลังเชื่อมต่อ...', text(22, '#bfe8ff')).setOrigin(0.5);
     addTextButton(this, 120, GAME_HEIGHT - 44, 'กลับ', () => this.back(), { width: 180, height: 58, fontSize: 24, color: 0x3a8dde });
     this.events.once('shutdown', () => {
       // Leaving the lobby for anything but a match closes the connection
@@ -293,11 +298,51 @@ export class LobbyScene extends Phaser.Scene {
       } else if (msg.t === 'roomList') {
         this.rooms = msg.rooms;
         this.drawRoomList();
+      } else if (msg.t === 'tourney') {
+        this.tourney = msg.view;
+        this.drawTourney();
       } else if (msg.t === 'error') this.status.setText(msg.message).setColor('#ff9a9a');
       else if (msg.t === 'start') {
         this.scene.start('Online', { net, start: msg });
         return;
       }
+    }
+  }
+
+  /** Strip under the cards: the tournament the teacher opened, and where we stand in it */
+  private drawTourney() {
+    this.tourneyItems.forEach((o) => o.destroy());
+    this.tourneyItems = [];
+    const v = this.tourney;
+    if (!v) return;
+    const y = 612;
+    const g = this.add.graphics();
+    g.fillStyle(0x5b2a86, 0.92).fillRoundedRect(GAME_WIDTH / 2 - 440, y - 28, 880, 56, 18);
+    g.lineStyle(3, 0xffcc33, 1).strokeRoundedRect(GAME_WIDTH / 2 - 440, y - 28, 880, 56, 18);
+    this.tourneyItems.push(g);
+    const round = `รอบที่ ${v.round}/${v.rounds}`;
+    let msg: string;
+    let button: { label: string; send: 'tjoin' | 'tleave' } | null = null;
+    if (v.status === 'signup') {
+      msg = v.joined ? `ลงชื่อทัวร์นาเมนต์แล้ว รอครูกดเริ่ม (${v.players} คน)` : `ครูเปิดทัวร์นาเมนต์! ลงชื่อแล้ว ${v.players} คน`;
+      button = v.joined ? { label: 'ถอนชื่อ', send: 'tleave' } : { label: 'เข้าร่วม', send: 'tjoin' };
+    } else if (v.status === 'done') {
+      msg = v.me === 'champion' ? 'คุณคือแชมป์ทัวร์นาเมนต์!' : `แชมป์ทัวร์นาเมนต์: ${v.champion ?? '-'}`;
+    } else if (v.me === 'waiting') {
+      msg = `ทัวร์นาเมนต์ ${round}: เจอกับ ${v.opponent ?? '?'} เกมจะเริ่มเองเมื่ออยู่ในห้องรอทั้งคู่`;
+    } else if (v.me === 'playing') {
+      msg = `ทัวร์นาเมนต์ ${round}: กำลังเริ่มเกม...`;
+    } else if (v.me === 'through') {
+      msg = `ผ่านเข้ารอบแล้ว! รอคู่ถัดไป (${round})`;
+    } else if (v.me === 'out') {
+      msg = 'คุณตกรอบแล้ว ดูการแข่งต่อบนจอของครูได้';
+    } else {
+      msg = `ทัวร์นาเมนต์ของห้องกำลังแข่ง (${round})`;
+    }
+    this.tourneyItems.push(this.add.text(GAME_WIDTH / 2 - 410, y, msg, text(20, '#ffffff')).setOrigin(0, 0.5));
+    if (button) {
+      const b = button;
+      this.tourneyItems.push(addTextButton(this, GAME_WIDTH / 2 + 360, y, b.label, () => this.net?.send({ t: b.send }), { width: 140, height: 42, fontSize: 20, color: b.send === 'tjoin' ? 0x2fbf5b : 0x8a8fa8 }));
     }
   }
 

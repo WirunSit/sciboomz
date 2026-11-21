@@ -236,7 +236,8 @@ async function startRoom(lobby: Lobby, mode: 'team' | 'coop', n: number, opts: {
 }
 
 test('2 v 2: four players make two teams; the room starts when full; turn order follows delay', async () => {
-  const lobby = fastLobby();
+  // Long turns: a turn running out of time here would change the order being checked
+  const lobby = fastLobby({ room: { animationScale: 0, graceMs: 50, turnSeconds: 30, quizSeconds: 1 } });
   const { ps, starts } = await startRoom(lobby, 'team', 4);
   const s = starts[0];
   assert.equal(s.mode, 'team');

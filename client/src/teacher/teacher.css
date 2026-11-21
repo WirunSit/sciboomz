@@ -157,3 +157,21 @@ dialog::backdrop { background: rgb(0 0 0 / 45%); }
   .bar-row { grid-template-columns: 1fr; gap: 2px; }
   .pin-sheet { grid-template-columns: 1fr; }
 }
+
+/* Classroom tournament bracket (also shown full screen on a projector) */
+.bracket { display: flex; gap: 28px; overflow-x: auto; padding: 8px 4px 16px; background: var(--surface-1); }
+.bracket .round { display: flex; flex-direction: column; justify-content: space-around; gap: 14px; min-width: 200px; }
+.bracket .round h3 { text-align: center; color: var(--text-secondary); }
+.bracket .match { border: 2px solid var(--border); border-radius: 12px; background: var(--surface-2); overflow: hidden; }
+.bracket .match.playing { border-color: var(--accent); box-shadow: 0 0 0 3px rgb(255 138 31 / 25%); }
+.bracket .match > div { padding: 6px 12px; display: flex; justify-content: space-between; gap: 8px; }
+.bracket .match > div + div { border-top: 1px solid var(--border); }
+.bracket .win { font-weight: 600; color: var(--good); }
+.bracket .lose { color: var(--text-muted); text-decoration: line-through; }
+.bracket .bye { color: var(--text-muted); font-style: italic; }
+.bracket .state { font-size: 12px; color: var(--accent); white-space: nowrap; }
+.champion { text-align: center; font-size: 28px; font-weight: 600; color: var(--accent); margin: 8px 0 16px; }
+.bracket-wrap:fullscreen { background: var(--surface-1); padding: 32px; overflow: auto; font-size: 22px; }
+.bracket-wrap:fullscreen .round { min-width: 280px; }
+.bracket-wrap:fullscreen .champion { font-size: 44px; }
+.signup-list { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 16px; }

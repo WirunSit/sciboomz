@@ -242,12 +242,14 @@ async function renderClassroom(id: string, tab: string) {
     ...[
       ['students', 'นักเรียนและ PIN'],
       ['stats', 'สถิติ'],
+      ['tournament', 'ทัวร์นาเมนต์'],
       ['settings', 'ตั้งค่า'],
     ].map(([t, label]) => h('a', { href: `#/class/${id}/${t}`, class: t === tab ? 'on' : '' }, label)),
   );
   const body = h('div', {});
   page(`${c.name}`, h('p', {}, 'รหัสห้องเรียน ', h('b', { class: 'pin' }, c.code), h('span', { class: 'muted' }, ` · ให้นักเรียนเข้าเกมที่ ${gameUrl()}`)), tabs, body);
   if (tab === 'stats') await statsTab(body, c);
+  else if (tab === 'tournament') await tournamentTab(body, c);
   else if (tab === 'settings') await settingsTab(body, c);
   else studentsTab(body, c, data.students, data.maxStudents);
 }
@@ -441,6 +443,136 @@ async function statsTab(body: HTMLElement, c: ClassroomInfo) {
       ),
     ),
   );
+}
+
+// ---- Classroom tournament ---------------------------------------------------------------
+
+interface TourneyView {
+  status: 'signup' | 'running' | 'done';
+  quizDuel: boolean;
+  players: string[];
+  rounds: { a: string | null; b: string | null; winner: string | null; status: 'pending' | 'waiting' | 'playing' | 'done' }[][];
+  champion: string | null;
+}
+
+/** Refreshes the bracket while the tournament tab is open */
+let tourneyTimer: ReturnType<typeof setInterval> | null = null;
+
+async function tournamentTab(body: HTMLElement, c: ClassroomInfo) {
+  const path = `teacher/classrooms/${c.id}/tournament`;
+  const msg = h('p', { class: 'error' });
+  const wrap = h('div', {});
+  body.replaceChildren(wrap, msg);
+  const act = async (method: string, sub = '', data?: unknown) => {
+    msg.textContent = '';
+    try {
+      await api(method, path + sub, data);
+      await draw();
+    } catch (e) {
+      msg.textContent = (e as Error).message;
+    }
+  };
+
+  const draw = async () => {
+    const { tournament: t } = await api<{ tournament: TourneyView | null }>('GET', path);
+    if (!t) {
+      const quiz = h('input', { type: 'checkbox', checked: true });
+      wrap.replaceChildren(
+        h(
+          'div',
+          { class: 'card' },
+          h('h2', {}, 'แข่งขันในห้องเรียน (แพ้คัดออก)'),
+          h('p', {}, '1. กดเปิดรับสมัคร  2. ให้นักเรียนเข้าเกม ไปที่ "เล่นกับเพื่อน" แล้วกด "เข้าร่วม"  3. ครบแล้วกด "เริ่มแข่ง" ระบบจะจับคู่และเริ่มเกมให้เอง'),
+          h('p', { class: 'muted small' }, 'ทุกคู่แข่ง 1 ต่อ 1 คนชนะเข้ารอบต่อไปจนได้แชมป์ ถ้านักเรียนไม่อยู่ในห้องรอนานเกิน 1 นาที อีกฝ่ายผ่านเข้ารอบ'),
+          h('label', { class: 'check' }, quiz, 'Quiz Duel: ตอบคำถามก่อนยิงทุกตา (แนะนำ ได้ทบทวนบทเรียนไปด้วย)'),
+          h('p', {}, h('button', { onclick: () => void act('POST', '', { quizDuel: quiz.checked }) }, 'เปิดรับสมัคร')),
+        ),
+      );
+      return;
+    }
+    if (t.status === 'signup') {
+      wrap.replaceChildren(
+        h(
+          'div',
+          { class: 'card' },
+          h('h2', {}, `เปิดรับสมัครอยู่ · ลงชื่อแล้ว ${t.players.length} คน`),
+          h('p', { class: 'muted' }, `ให้นักเรียนกด "เข้าร่วม" ในหน้า "เล่นกับเพื่อน" ของเกม${t.quizDuel ? ' · โหมด Quiz Duel' : ''}`),
+          h('div', { class: 'signup-list' }, ...(t.players.length ? t.players.map((n) => h('span', { class: 'tag' }, n)) : [h('span', { class: 'muted' }, 'ยังไม่มีใครลงชื่อ')])),
+          h(
+            'div',
+            { class: 'row' },
+            h('button', { disabled: t.players.length < 2, onclick: () => void act('POST', '/start') }, 'เริ่มแข่ง'),
+            h('button', { class: 'secondary', onclick: () => void act('DELETE') }, 'ยกเลิกทัวร์นาเมนต์'),
+          ),
+        ),
+      );
+      return;
+    }
+    const bracket = h('div', { class: 'bracket-wrap' });
+    const total = t.rounds.length;
+    const roundName = (r: number) => (r === total - 1 ? 'รอบชิงชนะเลิศ' : r === total - 2 ? 'รอบรองชนะเลิศ' : `รอบที่ ${r + 1}`);
+    const player = (name: string | null, m: TourneyView['rounds'][number][number]) => {
+      // Empty seat: a bye in round 1 (the other player went straight through), or not decided yet
+      if (name === null) return h('span', { class: 'bye' }, m.status === 'done' ? 'ผ่านอัตโนมัติ' : 'รอผล...');
+      const cls = m.winner === null ? '' : m.winner === name ? 'win' : 'lose';
+      return h('span', { class: cls }, name);
+    };
+    bracket.append(
+      t.champion ? h('div', { class: 'champion' }, `แชมป์: ${t.champion}`) : h('div', { class: 'champion' }, roundName(t.rounds.findIndex((r) => r.some((m) => m.status !== 'done')))),
+      h(
+        'div',
+        { class: 'bracket' },
+        ...t.rounds.map((round, r) =>
+          h(
+            'div',
+            { class: 'round' },
+            h('h3', {}, roundName(r)),
+            ...round.map((m) =>
+              h(
+                'div',
+                { class: `match ${m.status}` },
+                h('div', {}, player(m.a, m), m.status === 'playing' ? h('span', { class: 'state' }, 'กำลังแข่ง') : m.status === 'waiting' ? h('span', { class: 'state' }, 'รอเริ่ม') : null),
+                h('div', {}, player(m.b, m)),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    wrap.replaceChildren(
+      h(
+        'div',
+        { class: 'card' },
+        h(
+          'div',
+          { class: 'row', style: 'justify-content:space-between;align-items:center;margin-bottom:12px' },
+          h('h2', { style: 'margin:0' }, t.status === 'done' ? 'จบการแข่งขันแล้ว' : 'กำลังแข่งขัน'),
+          h(
+            'div',
+            { class: 'row' },
+            h('button', { onclick: () => void bracket.requestFullscreen?.() }, 'เต็มจอ (ฉายโปรเจกเตอร์)'),
+            h('button', { class: 'secondary', onclick: () => (t.status === 'done' || confirm('ยกเลิกทัวร์นาเมนต์ที่กำลังแข่งอยู่?')) && void act('DELETE') }, t.status === 'done' ? 'เริ่มทัวร์นาเมนต์ใหม่' : 'ยกเลิก'),
+          ),
+        ),
+        bracket,
+      ),
+    );
+  };
+
+  await draw();
+  // Keep the bracket up to date while this tab is open (results come in from the game)
+  if (tourneyTimer) clearInterval(tourneyTimer);
+  const here = location.hash;
+  tourneyTimer = setInterval(() => {
+    if (location.hash !== here) {
+      clearInterval(tourneyTimer!);
+      tourneyTimer = null;
+      return;
+    }
+    // Don't redraw under the teacher's cursor while they're picking an option
+    if (document.activeElement?.tagName === 'INPUT') return;
+    void draw().catch(() => {});
+  }, 2000);
 }
 
 async function settingsTab(body: HTMLElement, c: ClassroomInfo) {
