@@ -1,9 +1,11 @@
 import * as Phaser from 'phaser';
 import { DEPTH } from '../config';
+import { ImagePool, bake, dotTexture } from '../ui/bake';
 
 // Drawn effects (no extra art): flying dirt, weapon-coloured sparks, shock
-// rings and smoke trails. Each burst is ONE Graphics object redrawn every frame,
-// so a big explosion stays cheap, and it works in Canvas mode too (no tints).
+// rings and smoke trails. Pieces are images of small shapes drawn once per
+// colour (bake.ts), so a big explosion stays cheap on phones, and it works in
+// Canvas mode too (no tints).
 
 interface Particle {
   x: number;
@@ -49,51 +51,56 @@ export function blastStyle(projectile: string): BlastStyle {
 
 const GRAVITY = 900;
 
-/** Throw particles out and let them fall/fade, all drawn by one Graphics */
+/** A small square of one colour (rotated and stretched into chunks, shards, leaves and streaks) */
+function squareTexture(scene: Phaser.Scene, color: number): string {
+  return bake(scene, `fx-square:${color}`, 8, 8, (g) => g.fillStyle(color, 1).fillRect(0, 0, 8, 8));
+}
+
+/** Throw particles out and let them fall/fade (each one a plain image: cheap to draw on phones) */
 function burst(scene: Phaser.Scene, parts: Particle[], seconds: number, gravity = GRAVITY) {
-  const g = scene.add.graphics().setDepth(DEPTH.fx + 1);
+  const pool = new ImagePool(scene, DEPTH.fx + 1);
   let t = 0;
   const tick = (_time: number, deltaMs: number) => {
     // Follows the scene's slow motion (finishing blow)
     const dt = (Math.min(deltaMs, 50) / 1000) * scene.time.timeScale;
     t += dt;
     const life = 1 - t / seconds;
-    if (life <= 0 || !g.active) {
+    if (life <= 0) {
       scene.events.off(Phaser.Scenes.Events.UPDATE, tick);
-      g.destroy();
+      pool.destroy();
       return;
     }
-    g.clear();
     const alpha = Math.min(1, life * 2.5);
+    pool.begin();
     for (const p of parts) {
       p.vy += gravity * dt;
       p.vx *= 0.985;
       p.x += p.vx * dt;
       p.y += p.vy * dt;
       p.angle += p.spin * dt;
-      g.fillStyle(p.color, alpha);
-      g.lineStyle(Math.max(2, p.size * 0.5), p.color, alpha);
       switch (p.shape) {
         case 'dot':
-          g.fillCircle(p.x, p.y, p.size * (0.5 + 0.5 * life));
+          pool.take(dotTexture(scene, 8, p.color), p.x, p.y).setAlpha(alpha).setScale((p.size * (0.5 + 0.5 * life)) / 8);
           break;
         case 'streak': {
+          // A line pointing back along the way it flies
           const len = p.size * 2.2;
           const a = Math.atan2(p.vy, p.vx);
-          g.lineBetween(p.x, p.y, p.x - Math.cos(a) * len, p.y - Math.sin(a) * len);
+          pool
+            .take(squareTexture(scene, p.color), p.x - (Math.cos(a) * len) / 2, p.y - (Math.sin(a) * len) / 2)
+            .setAlpha(alpha)
+            .setScale(len / 8, Math.max(2, p.size * 0.5) / 8)
+            .setRotation(a);
           break;
         }
         default: {
           // Small rotated quad: dirt chunk, glass shard, leaf
-          const w = p.size;
           const h = p.shape === 'chunk' ? p.size * 0.8 : p.size * 0.45;
-          const c = Math.cos(p.angle);
-          const s = Math.sin(p.angle);
-          const pt = (dx: number, dy: number) => new Phaser.Math.Vector2(p.x + dx * c - dy * s, p.y + dx * s + dy * c);
-          g.fillPoints([pt(-w, -h), pt(w, -h), pt(w, h), pt(-w, h)], true);
+          pool.take(squareTexture(scene, p.color), p.x, p.y).setAlpha(alpha).setScale((p.size * 2) / 8, (h * 2) / 8).setRotation(p.angle);
         }
       }
     }
+    pool.end();
   };
   scene.events.on(Phaser.Scenes.Events.UPDATE, tick);
   scene.events.once(Phaser.Scenes.Events.SHUTDOWN, () => scene.events.off(Phaser.Scenes.Events.UPDATE, tick));
@@ -114,7 +121,8 @@ export function debris(scene: Phaser.Scene, x: number, y: number, radius: number
       vx: Math.cos(a) * speed,
       vy: Math.sin(a) * speed,
       size: 3 + Math.random() * 5,
-      color: colors[i % colors.length],
+      // Rounded to 16 shades per channel so a match reuses a handful of pictures
+      color: (colors[i % colors.length] & 0xf0f0f0) | 0x080808,
       shape: 'chunk',
       spin: (Math.random() - 0.5) * 14,
       angle: Math.random() * Math.PI,
@@ -166,11 +174,11 @@ export function weaponBlast(scene: Phaser.Scene, x: number, y: number, radius: n
  * draw() every frame; puffs shrink and fade on their own.
  */
 export class Trail {
-  private readonly g: Phaser.GameObjects.Graphics;
+  private readonly pool: ImagePool;
   private puffs: { x: number; y: number; color: number; age: number; size: number }[] = [];
 
-  constructor(scene: Phaser.Scene) {
-    this.g = scene.add.graphics().setDepth(DEPTH.projectile - 1);
+  constructor(private readonly scene: Phaser.Scene) {
+    this.pool = new ImagePool(scene, DEPTH.projectile - 1);
   }
 
   add(x: number, y: number, color: number, size = 7) {
@@ -179,16 +187,21 @@ export class Trail {
 
   draw(dt: number) {
     const LIFE = 0.55;
-    this.g.clear();
+    this.pool.begin();
     this.puffs = this.puffs.filter((p) => (p.age += dt) < LIFE);
     for (const p of this.puffs) {
       const k = 1 - p.age / LIFE;
-      this.g.fillStyle(p.color, 0.55 * k).fillCircle(p.x, p.y, p.size * (0.4 + 0.6 * k));
+      // One soft dot picture per colour, scaled and faded (images: no shapes rebuilt every frame)
+      this.pool
+        .take(dotTexture(this.scene, 8, p.color), p.x, p.y)
+        .setAlpha(0.55 * k)
+        .setScale((p.size * (0.4 + 0.6 * k)) / 8);
     }
+    this.pool.end();
   }
 
   clear() {
     this.puffs = [];
-    this.g.clear();
+    this.pool.clear();
   }
 }

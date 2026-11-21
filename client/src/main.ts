@@ -1,5 +1,6 @@
 import * as Phaser from 'phaser';
 import { GAME_HEIGHT, GAME_WIDTH } from './config';
+import { isTouchDevice, setupAutoFullscreen } from './fullscreen';
 import { BattleScene } from './scenes/BattleScene';
 import { CostumeSheetScene } from './scenes/CostumeSheetScene';
 import { QuestScene } from './scenes/QuestScene';
@@ -54,7 +55,14 @@ async function start() {
       mode: Phaser.Scale.FIT,
       autoCenter: Phaser.Scale.CENTER_BOTH,
     },
+    render: {
+      // Ask for the fast graphics chip on phones/laptops that have two
+      powerPreference: 'high-performance',
+      // Edge smoothing of shapes costs phones a lot of drawing work and barely shows on the small screen
+      antialiasGL: !isTouchDevice(),
+    },
     input: { activePointers: 3 }, // multi-touch: move + aim + fire on phones
+    disableContextMenu: true, // a long press on a phone must not pop up the browser's menu
     dom: { createContainer: true }, // real text boxes (room codes, login)
     scene: [PreloadScene, MenuScene, LoginScene, WorldMapScene, StageScene, InventoryScene, WardrobeScene, BattleScene, LobbyScene, OnlineBattleScene, CostumeSheetScene, QuestScene, LeaderboardScene],
   });
@@ -62,4 +70,5 @@ async function start() {
   if (import.meta.env.DEV) (window as unknown as { game: Phaser.Game }).game = game;
 }
 
+setupAutoFullscreen();
 start();

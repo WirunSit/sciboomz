@@ -58,6 +58,7 @@ import type { Combatant } from '../game/Combatant';
 import type { Fighter } from '../game/Fighter';
 import { TerrainView } from '../game/TerrainView';
 import { Trail, blastStyle, debris, weaponBlast } from '../game/effects';
+import { ImagePool, dotTexture, setTextColor } from '../ui/bake';
 import { Controls } from '../ui/Controls';
 import { Hud, type HudOptions } from '../ui/Hud';
 import { SkillBar, type SlotState } from '../ui/SkillBar';
@@ -186,7 +187,8 @@ export abstract class ArenaScene extends Phaser.Scene {
   private playback: Playback | null = null;
   private skillBar!: SkillBar;
   private skyMarker!: Phaser.GameObjects.Triangle;
-  private guide!: Phaser.GameObjects.Graphics;
+  /** Aim guide dots (images: far cheaper than redrawing circles every frame) */
+  private guide!: ImagePool;
   private guideKey = '';
   private panning = false;
   private camTarget: Combatant | null = null;
@@ -259,7 +261,7 @@ export abstract class ArenaScene extends Phaser.Scene {
       .setStrokeStyle(2, 0x1b1d3a)
       .setDepth(DEPTH.fx)
       .setVisible(false);
-    this.guide = this.add.graphics().setDepth(DEPTH.projectile);
+    this.guide = new ImagePool(this, DEPTH.projectile);
     this.trail = new Trail(this);
     this.finisher = null;
     this.afterFinish = null;
@@ -1273,8 +1275,8 @@ export abstract class ArenaScene extends Phaser.Scene {
       (b, p) => ({ minX: Math.min(b.minX, p.x), maxX: Math.max(b.maxX, p.x), minY: Math.min(b.minY, p.y) }),
       { minX: m.x, maxX: m.x, minY: m.y },
     );
-    const g = this.guide;
-    g.clear();
+    const dot = dotTexture(this, 4, 0xffffff, { width: 2, color: 0x1b1d3a, alpha: 0.6 });
+    this.guide.begin();
     // One dot every GUIDE_DOT_GAP px along the curve, fading towards the end
     let next = GUIDE_DOT_GAP / 2;
     let walked = 0;
@@ -1285,12 +1287,12 @@ export abstract class ArenaScene extends Phaser.Scene {
       while (d > 0 && next <= walked + d) {
         const t = (next - walked) / d;
         const fade = 1 - next / length;
-        g.fillStyle(0x1b1d3a, 0.5 * fade + 0.15).fillCircle(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, 6);
-        g.fillStyle(0xffffff, 0.75 * fade + 0.25).fillCircle(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, 4);
+        this.guide.take(dot, a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t).setAlpha(0.75 * fade + 0.25);
         next += GUIDE_DOT_GAP;
       }
       walked += d;
     }
+    this.guide.end();
   }
 
   /** Drag on empty space to look around the map */
@@ -1417,11 +1419,11 @@ export abstract class ArenaScene extends Phaser.Scene {
     g.fillStyle(color, 1).fillCircle(x, y, 12);
     g.lineStyle(3, 0x1b1d3a, 1).strokeCircle(x, y, 12);
     const f = this.human;
-    this.dragLabel
+    const label = this.dragLabel
       .setVisible(true)
       .setPosition(Phaser.Math.Clamp(x, 120, GAME_WIDTH - 120), Phaser.Math.Clamp(y - 44, 150, GAME_HEIGHT - 40))
-      .setText(live && f ? `แรง ${Math.round(this.power)} · มุม ${Math.round(f.angle)}°` : 'ปล่อยตรงนี้ = ยกเลิก')
-      .setColor(live ? '#ffffff' : '#cccccc');
+      .setText(live && f ? `แรง ${Math.round(this.power)} · มุม ${Math.round(f.angle)}°` : 'ปล่อยตรงนี้ = ยกเลิก');
+    setTextColor(label, live ? '#ffffff' : '#cccccc');
   }
 
   private endDragView() {

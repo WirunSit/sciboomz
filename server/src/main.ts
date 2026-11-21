@@ -59,7 +59,19 @@ const TYPES: Record<string, string> = {
   '.svg': 'image/svg+xml',
   '.ico': 'image/x-icon',
   '.woff2': 'font/woff2',
+  '.webmanifest': 'application/manifest+json',
 };
+
+/**
+ * How long phones may keep a file without asking again (saves re-downloading
+ * the art over mobile data on every visit). Built code has a fingerprint in its
+ * name (index-AbC123.js) so it never changes; pages and lists are always checked.
+ */
+function cacheControl(path: string): string {
+  if (/\.(html|json|webmanifest)$/.test(path)) return 'no-cache';
+  if (/-[\w-]{8,}\.(js|css)$/.test(path)) return 'public, max-age=31536000, immutable';
+  return 'public, max-age=86400';
+}
 
 const server = createServer(async (req, res) => {
   const url = new URL(req.url ?? '/', 'http://localhost');
@@ -83,7 +95,7 @@ const server = createServer(async (req, res) => {
     res.end(existsSync(STATIC_DIR) ? 'Not found' : 'Game not built yet: run `npm run build` (or use `npm run dev` while developing)');
     return;
   }
-  res.writeHead(200, { 'content-type': TYPES[extname(file)] ?? 'application/octet-stream' });
+  res.writeHead(200, { 'content-type': TYPES[extname(file)] ?? 'application/octet-stream', 'cache-control': cacheControl(path) });
   createReadStream(file).pipe(res);
 });
 

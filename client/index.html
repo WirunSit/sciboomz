@@ -2,8 +2,17 @@
 <html lang="th">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <title>SciBoom! บูมวิทย์</title>
+    <!-- Phones: "Add to Home Screen" opens the game full screen, sideways, with this icon -->
+    <link rel="manifest" href="manifest.webmanifest" />
+    <meta name="theme-color" content="#1b1d3a" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="SciBoom!" />
+    <link rel="apple-touch-icon" href="icons/icon-180.png" />
+    <link rel="icon" type="image/png" href="icons/icon-192.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@400;700&display=swap" rel="stylesheet" />
@@ -15,8 +24,18 @@
         overflow: hidden;
         touch-action: none;
         font-family: 'Kanit', sans-serif;
+        /* Phones: no pull-to-refresh, no text selection or "save image" pop-up on a long press, no grey tap flash */
+        overscroll-behavior: none;
+        -webkit-user-select: none;
+        user-select: none;
+        -webkit-touch-callout: none;
+        -webkit-tap-highlight-color: transparent;
       }
+      /* dvh = the screen height without the browser's bars (they come and go on phones) */
+      html, body { height: 100dvh; }
       #game { width: 100%; height: 100%; }
+      /* Typing boxes (login, room code) still need to be selectable */
+      input, textarea { -webkit-user-select: text; user-select: text; }
       #rotate-hint {
         display: none;
         position: fixed;

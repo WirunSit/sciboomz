@@ -1,6 +1,7 @@
 import * as Phaser from 'phaser';
 import { isMuted, setMuted, sfx } from '../audio/Sound';
 import { DEPTH, FONT_FAMILY, GAME_HEIGHT, GAME_WIDTH, TEXT_STROKE } from '../config';
+import { autoFullscreen, canFullscreen, isTouchDevice, setAutoFullscreen } from '../fullscreen';
 import { aimMode, setAimMode, type AimMode } from '../settings';
 import { addTextButton } from './TextButton';
 
@@ -50,7 +51,7 @@ export function openSettings(scene: Phaser.Scene) {
   // Dim everything and swallow taps so nothing underneath reacts
   keep(scene.add.rectangle(0, 0, GAME_WIDTH, GAME_HEIGHT, 0x0b0c1f, 0.7).setOrigin(0).setInteractive());
   const pw = 820;
-  const ph = 520;
+  const ph = 600;
   const top = (GAME_HEIGHT - ph) / 2;
   const panel = keep(scene.add.graphics());
   panel.fillStyle(0x1b1d3a, 0.97).fillRoundedRect(GAME_WIDTH / 2 - pw / 2, top, pw, ph, 26);
@@ -84,7 +85,7 @@ export function openSettings(scene: Phaser.Scene) {
   draw();
 
   // Sound
-  const soundY = top + 372;
+  const soundY = top + 366;
   keep(scene.add.text(GAME_WIDTH / 2 - pw / 2 + 40, soundY, 'เสียงและเพลง', style(26)).setOrigin(0, 0.5));
   let soundBtn: Phaser.GameObjects.Container | null = null;
   const drawSound = () => {
@@ -98,6 +99,27 @@ export function openSettings(scene: Phaser.Scene) {
     );
   };
   drawSound();
+
+  // Full screen (phones: hides the browser's bars). iPhones can't from a web page: say how instead
+  const fullY = top + 444;
+  keep(scene.add.text(GAME_WIDTH / 2 - pw / 2 + 40, fullY, 'เต็มจอ', style(26)).setOrigin(0, 0.5));
+  if (canFullscreen()) {
+    let fullBtn: Phaser.GameObjects.Container | null = null;
+    const drawFull = () => {
+      fullBtn?.destroy();
+      const on = autoFullscreen();
+      fullBtn = keep(
+        addTextButton(scene, GAME_WIDTH / 2 + 220, fullY, on ? 'เปิดอยู่' : 'ปิดอยู่', () => {
+          setAutoFullscreen(!on);
+          drawFull();
+        }, { width: 200, height: 56, fontSize: 24, color: on ? 0x2fbf5b : 0x8a8fa8 }),
+      );
+    };
+    drawFull();
+  } else {
+    const how = isTouchDevice() ? 'iPhone: กดปุ่มแชร์ แล้ว "เพิ่มไปยังหน้าจอโฮม"\nเปิดเกมจากไอคอนนั้นจะเต็มจอ' : 'เบราว์เซอร์นี้เปิดเต็มจอไม่ได้';
+    keep(scene.add.text(GAME_WIDTH / 2 + 220, fullY, how, style(17, '#d8e4ff')).setOrigin(0.5).setAlign('center'));
+  }
 
   keep(addTextButton(scene, GAME_WIDTH / 2, top + ph - 50, 'ปิด', close, { width: 220, height: 60, fontSize: 26, color: 0xff8a1f }));
 }

@@ -3,12 +3,19 @@ import type { Terrain } from '@sciboom/shared';
 import { DEPTH } from '../config';
 
 /**
- * Draws a shared Terrain mask into a canvas texture and keeps the two in sync
- * when explosions carve craters.
+ * Width of one strip of the ground picture. A crater only re-sends the strips it
+ * touches to the graphics card (a whole 2000×720 picture makes phones hitch).
+ */
+const STRIP = 256;
+
+/**
+ * Draws a shared Terrain mask into canvas textures (side-by-side strips) and
+ * keeps the two in sync when explosions carve craters.
  */
 export class TerrainView {
-  private readonly texture: Phaser.Textures.CanvasTexture;
-  private readonly ctx: CanvasRenderingContext2D;
+  private readonly strips: { texture: Phaser.Textures.CanvasTexture; ctx: CanvasRenderingContext2D; x: number }[] = [];
+  /** The ground's colours as first painted (read back for crater dirt without asking the graphics card) */
+  private pixels: Uint8ClampedArray = new Uint8ClampedArray(0);
 
   /**
    * @param groundKey texture from art sheet 12 (e.g. 'terrain/arena_candy'); its top edge
@@ -19,19 +26,30 @@ export class TerrainView {
     readonly terrain: Terrain,
     groundKey?: string,
   ) {
-    const key = 'terrain';
-    if (scene.textures.exists(key)) scene.textures.remove(key);
-    this.texture = scene.textures.createCanvas(key, terrain.width, terrain.height)!;
-    this.ctx = this.texture.getContext();
+    for (let x = 0, i = 0; x < terrain.width; x += STRIP, i++) {
+      const key = `terrain:${i}`;
+      if (scene.textures.exists(key)) scene.textures.remove(key);
+      const texture = scene.textures.createCanvas(key, Math.min(STRIP, terrain.width - x), terrain.height)!;
+      this.strips.push({ texture, ctx: texture.getContext(), x });
+      scene.add.image(x, 0, key).setOrigin(0).setDepth(DEPTH.terrain);
+    }
     if (groundKey && scene.textures.exists(groundKey)) this.paintTextured(scene, groundKey);
     else this.paint();
-    scene.add.image(0, 0, key).setOrigin(0).setDepth(DEPTH.terrain);
+  }
+
+  /** Copy the painted picture into the strips */
+  private show(img: ImageData) {
+    this.pixels = img.data;
+    for (const s of this.strips) {
+      s.ctx.putImageData(img, -s.x, 0, s.x, 0, s.texture.width, s.texture.height);
+      s.texture.refresh();
+    }
   }
 
   /** Colour every solid pixel: grass on top, then layered soil with speckles */
   private paint() {
     const { width: w, height: h, mask } = this.terrain;
-    const img = this.ctx.createImageData(w, h);
+    const img = new ImageData(w, h);
     const px = img.data;
     for (let x = 0; x < w; x++) {
       let top = -1;
@@ -67,8 +85,7 @@ export class TerrainView {
         px[o + 3] = 255;
       }
     }
-    this.ctx.putImageData(img, 0, 0);
-    this.texture.refresh();
+    this.show(img);
   }
 
   /**
@@ -93,7 +110,7 @@ export class TerrainView {
     };
 
     const { width: w, height: h, mask } = this.terrain;
-    const img = this.ctx.createImageData(w, h);
+    const img = new ImageData(w, h);
     const px = img.data;
     for (let x = 0; x < w; x++) {
       const u = mirror(Math.floor(x / SCALE), T);
@@ -117,8 +134,7 @@ export class TerrainView {
         px[o + 3] = 255;
       }
     }
-    this.ctx.putImageData(img, 0, 0);
-    this.texture.refresh();
+    this.show(img);
   }
 
   /** Colours of the ground inside a circle (for the dirt thrown out of a crater); empty if there's none */
@@ -130,8 +146,8 @@ export class TerrainView {
       const x = Math.round(cx + Math.cos(a) * r);
       const y = Math.round(cy + Math.sin(a) * r);
       if (!this.terrain.isSolid(x, y)) continue;
-      const [red, green, blue] = this.ctx.getImageData(x, y, 1, 1).data;
-      out.push((red << 16) | (green << 8) | blue);
+      const o = (y * this.terrain.width + x) * 4;
+      out.push((this.pixels[o] << 16) | (this.pixels[o + 1] << 8) | this.pixels[o + 2]);
     }
     return out;
   }
@@ -139,20 +155,24 @@ export class TerrainView {
   /** Blow a crater in both the data and the picture, with a scorched rim */
   carve(cx: number, cy: number, radius: number) {
     this.terrain.carve(cx, cy, radius);
-    const ctx = this.ctx;
-    ctx.save();
-    // Darken the ground just around the hole (only where ground exists)
-    ctx.globalCompositeOperation = 'source-atop';
-    ctx.fillStyle = 'rgba(60, 35, 20, 0.55)';
-    ctx.beginPath();
-    ctx.arc(cx, cy, radius + 7, 0, Math.PI * 2);
-    ctx.fill();
-    // Then cut the hole itself
-    ctx.globalCompositeOperation = 'destination-out';
-    ctx.beginPath();
-    ctx.arc(cx, cy, radius, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-    this.texture.refresh();
+    const reach = radius + 8;
+    for (const { texture, ctx, x } of this.strips) {
+      if (cx + reach < x || cx - reach > x + texture.width) continue; // this strip isn't touched
+      ctx.save();
+      ctx.translate(-x, 0);
+      // Darken the ground just around the hole (only where ground exists)
+      ctx.globalCompositeOperation = 'source-atop';
+      ctx.fillStyle = 'rgba(60, 35, 20, 0.55)';
+      ctx.beginPath();
+      ctx.arc(cx, cy, radius + 7, 0, Math.PI * 2);
+      ctx.fill();
+      // Then cut the hole itself
+      ctx.globalCompositeOperation = 'destination-out';
+      ctx.beginPath();
+      ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+      texture.refresh();
+    }
   }
 }

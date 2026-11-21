@@ -1,6 +1,7 @@
 import * as Phaser from 'phaser';
 import { ITEM_SKILLS, SKILL_SLOTS, type SkillSlot } from '@sciboom/shared';
 import { DEPTH, FONT_FAMILY, GAME_HEIGHT, GAME_WIDTH, TEXT_STROKE } from '../config';
+import { bake, setTextColor } from './bake';
 
 
 export interface SlotState {
@@ -34,11 +35,32 @@ const style = (size: number, color = '#ffffff'): Phaser.Types.GameObjects.Text.T
 
 interface SlotView {
   root: Phaser.GameObjects.Container;
-  ring: Phaser.GameObjects.Graphics;
+  ring: Phaser.GameObjects.Image;
   icon: Phaser.GameObjects.Container;
   badge: Phaser.GameObjects.Text;
   cost: Phaser.GameObjects.Text;
   note: Phaser.GameObjects.Text;
+}
+
+/** The button's round background, drawn once per look (gauge in 1% steps) */
+function ringTexture(scene: Phaser.Scene, s: SlotState): string {
+  const fill = s.fill === undefined ? -1 : Math.round(Math.min(1, s.fill) * 100) / 100;
+  const color = s.armed ? 0xffee55 : s.enabled ? 0xffffff : 0x666677;
+  const R = SIZE / 2 + 8; // room for the gauge and the outline
+  return bake(scene, `skill-ring:${s.armed ? 1 : 0}:${color}:${fill}`, R * 2, R * 2, (g) => {
+    g.fillStyle(s.armed ? 0x5a3d00 : 0x1b1d3a, 0.85).fillCircle(R, R, SIZE / 2);
+    if (fill >= 0) {
+      // Gauge drawn as an arc around the button
+      g.lineStyle(6, 0x3a3d5a, 1).strokeCircle(R, R, SIZE / 2);
+      if (fill > 0) {
+        g.lineStyle(6, fill >= 1 ? 0xffcc33 : 0xff7a1a, 1);
+        g.beginPath();
+        g.arc(R, R, SIZE / 2, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * fill);
+        g.strokePath();
+      }
+    }
+    g.lineStyle(s.armed ? 5 : 3, color, 1).strokeCircle(R, R, SIZE / 2 + (fill >= 0 ? 4 : 0));
+  });
 }
 
 /** Row of round skill buttons above the power bar (tap, or keys 1–9 and 0) */
@@ -64,7 +86,7 @@ export class SkillBar {
     const x0 = GAME_WIDTH / 2 - ((SKILL_SLOTS.length - 1) * GAP) / 2;
     SKILL_SLOTS.forEach((slot, i) => {
       const x = x0 + i * GAP;
-      const ring = scene.add.graphics();
+      const ring = scene.add.image(0, 0, '__DEFAULT');
       const icon = scene.add.container(0, 0);
       const label = scene.add.text(0, SIZE / 2 + 11, names[slot], style(12)).setOrigin(0.5);
       const keyHint = scene.add.text(-SIZE / 2 + 1, -SIZE / 2 - 1, KEY_LABELS[i], style(12, '#ffcc33')).setOrigin(0.5);
@@ -146,23 +168,10 @@ export class SkillBar {
     for (const slot of SKILL_SLOTS) {
       const s = states[slot];
       const v = this.views.get(slot)!;
-      const g = v.ring;
-      g.clear();
-      g.fillStyle(s.armed ? 0x5a3d00 : 0x1b1d3a, 0.85).fillCircle(0, 0, SIZE / 2);
-      if (s.fill !== undefined) {
-        // Gauge drawn as an arc around the button
-        g.lineStyle(6, 0x3a3d5a, 1).strokeCircle(0, 0, SIZE / 2);
-        if (s.fill > 0) {
-          g.lineStyle(6, s.fill >= 1 ? 0xffcc33 : 0xff7a1a, 1);
-          g.beginPath();
-          g.arc(0, 0, SIZE / 2, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.min(1, s.fill));
-          g.strokePath();
-        }
-      }
-      g.lineStyle(s.armed ? 5 : 3, s.armed ? 0xffee55 : s.enabled ? 0xffffff : 0x666677, 1).strokeCircle(0, 0, SIZE / 2 + (s.fill !== undefined ? 4 : 0));
+      v.ring.setTexture(ringTexture(this.scene, s));
       v.icon.setAlpha(s.enabled || s.armed ? 1 : 0.35);
-      v.badge.setText(s.count !== undefined ? `x${s.count}` : '').setColor(s.count ? '#7dff8a' : '#ff9a9a');
-      v.cost.setText(s.cost !== undefined && !s.note ? String(s.cost) : '').setColor(s.enabled || s.armed ? '#5fd4ff' : '#8a8fa8');
+      setTextColor(v.badge.setText(s.count !== undefined ? `x${s.count}` : ''), s.count ? '#7dff8a' : '#ff9a9a');
+      setTextColor(v.cost.setText(s.cost !== undefined && !s.note ? String(s.cost) : ''), s.enabled || s.armed ? '#5fd4ff' : '#8a8fa8');
       v.note.setText(s.note ?? '');
       v.root.setScale(s.armed ? 1.1 : 1);
     }

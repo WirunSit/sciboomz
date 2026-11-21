@@ -2,6 +2,7 @@ import * as Phaser from 'phaser';
 import { MAX_WIND, type Terrain, type Vec } from '@sciboom/shared';
 import { DEPTH, FONT_FAMILY, GAME_HEIGHT, GAME_WIDTH, TEXT_STROKE } from '../config';
 import type { Combatant } from '../game/Combatant';
+import { bake, dotTexture, setTextColor } from './bake';
 import { BAR_FRAMES, FrameBar } from './FrameBar';
 
 const textStyle = (size: number, color = '#ffffff'): Phaser.Types.GameObjects.Text.TextStyle => ({
@@ -40,11 +41,15 @@ export class Hud {
   private readonly powerBar: FrameBar;
   private readonly powerMarker: Phaser.GameObjects.Triangle;
   private readonly powerArea: { x: number; w: number };
-  private readonly staminaFill: Phaser.GameObjects.Graphics;
-  private readonly staminaY: number;
+  private readonly staminaFill: Phaser.GameObjects.Image;
+  private readonly staminaEnd: Phaser.GameObjects.Image;
   private readonly staminaText: Phaser.GameObjects.Text;
-  private readonly minimapGround: Phaser.GameObjects.Graphics;
-  private readonly minimapDots: Phaser.GameObjects.Graphics;
+  /** Drawn on a small canvas only when craters change the ground (not every frame) */
+  private readonly minimapGround: Phaser.GameObjects.Image;
+  private readonly minimapTexture: Phaser.Textures.CanvasTexture;
+  private readonly minimapView: Phaser.GameObjects.Rectangle;
+  private readonly minimapDots: Phaser.GameObjects.Image[] = [];
+  private readonly minimapShot: Phaser.GameObjects.Image;
   private readonly mapScale: number;
   private statusItems: Phaser.GameObjects.GameObject[] = [];
   private lastBanner?: Phaser.GameObjects.Text;
@@ -89,8 +94,11 @@ export class Hud {
     // Mini-map
     this.mapScale = MINIMAP.w / worldWidth;
     const mapBg = scene.add.rectangle(MINIMAP.x, MINIMAP.y, MINIMAP.w, MINIMAP.h, 0x1b1d3a, 0.55).setOrigin(0).setStrokeStyle(2, 0xffffff, 0.6);
-    this.minimapGround = scene.add.graphics();
-    this.minimapDots = scene.add.graphics();
+    if (scene.textures.exists('hud:minimap')) scene.textures.remove('hud:minimap');
+    this.minimapTexture = scene.textures.createCanvas('hud:minimap', MINIMAP.w, MINIMAP.h)!;
+    this.minimapGround = scene.add.image(MINIMAP.x, MINIMAP.y, 'hud:minimap').setOrigin(0);
+    this.minimapView = scene.add.rectangle(MINIMAP.x, MINIMAP.y, 1, MINIMAP.h).setOrigin(0).setStrokeStyle(2, 0xffffff, 0.8);
+    this.minimapShot = scene.add.image(0, 0, dotTexture(scene, 2.5, 0xffffff)).setVisible(false);
 
     // Bottom: angle + power bar
     const barY = GAME_HEIGHT - 52;
@@ -108,15 +116,17 @@ export class Hud {
     const stY = GAME_HEIGHT - 138;
     const stLabel = scene.add.text(40, stY - 20, 'สตามินา', textStyle(16)).setOrigin(0, 0.5);
     this.staminaText = scene.add.text(230, stY - 20, '', textStyle(16, '#5fd4ff')).setOrigin(1, 0.5);
-    const stBg = scene.add.graphics();
-    stBg.fillStyle(0x1b1d3a, 0.7).fillRoundedRect(40, stY - 7, 190, 14, 7);
-    stBg.lineStyle(2, 0xffffff, 0.7).strokeRoundedRect(40, stY - 7, 190, 14, 7);
-    this.staminaFill = scene.add.graphics();
-    this.staminaY = stY;
+    const stBg = scene.add.image(39, stY - 8, bake(scene, 'hud:stamina-bg', 192, 16, (g) => {
+      g.fillStyle(0x1b1d3a, 0.7).fillRoundedRect(1, 1, 190, 14, 7);
+      g.lineStyle(2, 0xffffff, 0.7).strokeRoundedRect(1, 1, 190, 14, 7);
+    })).setOrigin(0);
+    // The full bar cut at the level (crop) plus a round right end: drawn once, not per level
+    this.staminaFill = scene.add.image(43, stY - 4, bake(scene, 'hud:stamina', 184, 8, (g) => g.fillStyle(0x5fd4ff, 1).fillRoundedRect(0, 0, 184, 8, 4))).setOrigin(0);
+    this.staminaEnd = scene.add.image(0, stY, dotTexture(scene, 4, 0x5fd4ff)).setOrigin(1, 0.5);
 
     for (const o of [
-      timerBg, this.timerText, this.windArrow, this.windText, mapBg, this.minimapGround, this.minimapDots,
-      gauge, this.angleText, ...this.powerBar.objects, this.powerMarker, powerLabel, stLabel, this.staminaText, stBg, this.staminaFill,
+      timerBg, this.timerText, this.windArrow, this.windText, mapBg, this.minimapGround, this.minimapView, this.minimapShot,
+      gauge, this.angleText, ...this.powerBar.objects, this.powerMarker, powerLabel, stLabel, this.staminaText, stBg, this.staminaFill, this.staminaEnd,
     ]) {
       o.setScrollFactor(0).setDepth(DEPTH.hud);
     }
@@ -127,8 +137,7 @@ export class Hud {
     const dir = side === 'left' ? 1 : -1;
     const edge = side === 'left' ? 16 : GAME_WIDTH - 16;
 
-    const plate = s.add.graphics();
-    plate.fillStyle(0x1b1d3a, 0.6).fillRoundedRect(side === 'left' ? 8 : GAME_WIDTH - 368, 8, 360, 92, 18);
+    const plate = s.add.image(side === 'left' ? 8 : GAME_WIDTH - 368, 8, bake(s, 'hud:plate', 360, 92, (g) => g.fillStyle(0x1b1d3a, 0.6).fillRoundedRect(0, 0, 360, 92, 18))).setOrigin(0);
     const portrait = s.add.image(edge + dir * 40, 96, f.portraitKey).setOrigin(0.5, 1);
     portrait.setScale(Math.min(86 / portrait.height, 84 / portrait.width));
     const name = s.add.text(edge + dir * 92, 14, f.name, textStyle(22)).setOrigin(side === 'left' ? 0 : 1, 0);
@@ -149,10 +158,11 @@ export class Hud {
     const dir = side === 'left' ? 1 : -1;
     const edge = side === 'left' ? 8 : GAME_WIDTH - 8;
     const y = 8 + row * (COMPACT.h + COMPACT.gap);
-    const plate = s.add.graphics();
-    plate.fillStyle(0x1b1d3a, 0.6).fillRoundedRect(side === 'left' ? edge : edge - COMPACT.w, y, COMPACT.w, COMPACT.h, 12);
-    // Team colour stripe
-    plate.fillStyle(f.color, 1).fillRoundedRect(side === 'left' ? edge : edge - 6, y + 4, 6, COMPACT.h - 8, 3);
+    const plate = s.add.image(side === 'left' ? edge : edge - COMPACT.w, y, bake(s, `hud:compact:${side}:${f.color}`, COMPACT.w, COMPACT.h, (g) => {
+      g.fillStyle(0x1b1d3a, 0.6).fillRoundedRect(0, 0, COMPACT.w, COMPACT.h, 12);
+      // Team colour stripe
+      g.fillStyle(f.color, 1).fillRoundedRect(side === 'left' ? 0 : COMPACT.w - 6, 4, 6, COMPACT.h - 8, 3);
+    })).setOrigin(0);
     const portrait = s.add.image(edge + dir * 34, y + COMPACT.h - 2, f.portraitKey).setOrigin(0.5, 1);
     portrait.setScale(Math.min((COMPACT.h - 4) / portrait.height, 52 / portrait.width));
     const name = s.add.text(edge + dir * 64, y + 2, f.name, textStyle(15)).setOrigin(side === 'left' ? 0 : 1, 0);
@@ -207,7 +217,7 @@ export class Hud {
   setTimer(seconds: number) {
     const s = Math.max(0, Math.ceil(seconds));
     this.timerText.setText(String(s));
-    this.timerText.setColor(s <= 5 ? '#ff5544' : '#ffcc33');
+    setTextColor(this.timerText, s <= 5 ? '#ff5544' : '#ffcc33');
   }
 
   setWind(wind: number) {
@@ -231,37 +241,40 @@ export class Hud {
   setStamina(frac: number, value?: number) {
     // Rounded ends like the frame (the radius shrinks for a nearly empty bar)
     const w = 184 * Math.max(0, Math.min(1, frac));
-    this.staminaFill.clear();
-    if (w > 0.5) this.staminaFill.fillStyle(0x5fd4ff, 1).fillRoundedRect(43, this.staminaY - 4, w, 8, Math.min(4, w / 2));
+    this.staminaFill.setVisible(w > 0.5).setCrop(0, 0, Math.max(0, w - 4), 8);
+    this.staminaEnd.setVisible(w > 0.5).setX(43 + Math.max(w, 9) + 1);
     this.staminaText.setText(value === undefined ? '' : String(Math.floor(value)));
   }
 
   /** Redraw the terrain outline in the mini-map (call after craters change it) */
   drawMinimap(terrain: Terrain) {
-    const g = this.minimapGround;
-    g.clear();
-    g.fillStyle(0x7fd36a, 0.9);
+    const ctx = this.minimapTexture.getContext();
+    ctx.clearRect(0, 0, MINIMAP.w, MINIMAP.h);
+    ctx.fillStyle = 'rgba(127, 211, 106, 0.9)';
     const sy = MINIMAP.h / terrain.height;
     for (let x = 0; x < terrain.width; x += 8) {
       // Every solid stretch of the column (floating islands have sky below them)
       for (const [top, bottom] of terrain.columnRuns(x)) {
-        g.fillRect(MINIMAP.x + x * this.mapScale, MINIMAP.y + top * sy, Math.max(1, 8 * this.mapScale), Math.max(1, (bottom + 1 - top) * sy));
+        ctx.fillRect(x * this.mapScale, top * sy, Math.max(1, 8 * this.mapScale), Math.max(1, (bottom + 1 - top) * sy));
       }
     }
+    this.minimapTexture.refresh();
   }
 
   updateMinimap(terrainHeight: number, viewX: number, viewW: number, projectile: Vec | null) {
-    const g = this.minimapDots;
     const sy = MINIMAP.h / terrainHeight;
-    g.clear();
-    g.lineStyle(2, 0xffffff, 0.8).strokeRect(MINIMAP.x + viewX * this.mapScale, MINIMAP.y, viewW * this.mapScale, MINIMAP.h);
-    for (const f of this.fighters) {
-      if (!f.alive || !this.showOnMap(f)) continue;
-      g.fillStyle(f.color, 1).fillCircle(MINIMAP.x + f.x * this.mapScale, MINIMAP.y + Math.max(0, f.y - 30) * sy, 4);
-    }
-    if (projectile) {
-      g.fillStyle(0xffffff, 1).fillCircle(MINIMAP.x + projectile.x * this.mapScale, MINIMAP.y + Phaser.Math.Clamp(projectile.y, 0, terrainHeight) * sy, 2.5);
-    }
+    const vx = MINIMAP.x + viewX * this.mapScale;
+    const vw = viewW * this.mapScale;
+    if (this.minimapView.x !== vx || this.minimapView.width !== vw) this.minimapView.setPosition(vx, MINIMAP.y).setSize(vw, MINIMAP.h);
+    this.fighters.forEach((f, i) => {
+      // Fighters can join mid-match (a boss splitting in two)
+      const dot = (this.minimapDots[i] ??= this.scene.add.image(0, 0, dotTexture(this.scene, 4, f.color)).setScrollFactor(0).setDepth(DEPTH.hud));
+      const on = f.alive && this.showOnMap(f);
+      dot.setVisible(on);
+      if (on) dot.setPosition(MINIMAP.x + f.x * this.mapScale, MINIMAP.y + Math.max(0, f.y - 30) * sy);
+    });
+    this.minimapShot.setVisible(!!projectile);
+    if (projectile) this.minimapShot.setPosition(MINIMAP.x + projectile.x * this.mapScale, MINIMAP.y + Phaser.Math.Clamp(projectile.y, 0, terrainHeight) * sy);
   }
 
   /** Big centred message that fades away (e.g. "ตาของผู้เล่น 1") */

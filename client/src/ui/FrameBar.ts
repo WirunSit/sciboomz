@@ -1,4 +1,5 @@
 import * as Phaser from 'phaser';
+import { bake } from './bake';
 
 /**
  * Where the coloured part goes inside a bar frame picture, in the picture's own
@@ -26,14 +27,16 @@ const ARC_STEPS = 14;
  * the hole's round ends exactly, at every fill level.
  */
 export class FrameBar {
-  readonly objects: (Phaser.GameObjects.Image | Phaser.GameObjects.Graphics)[];
+  readonly objects: Phaser.GameObjects.Image[];
   /** The hole on screen (where the fill can go) */
   readonly holeX: number;
   readonly holeW: number;
   private readonly holeY: number;
   private readonly holeH: number;
   private readonly rx: number;
-  private readonly fill: Phaser.GameObjects.Graphics;
+  private readonly fill: Phaser.GameObjects.Image;
+  private readonly scene: Phaser.Scene;
+  private readonly spec: BarFrameSpec;
   private readonly frameParts: Phaser.GameObjects.Image[];
 
   /** (x, y) is the centre; `height` sets the scale, `width` how long it is */
@@ -64,21 +67,33 @@ export class FrameBar {
     this.holeY = y - height / 2 + spec.hole.top * s;
     this.holeH = spec.hole.height * s;
     this.rx = spec.hole.rx * s;
-    this.fill = scene.add.graphics();
+    this.scene = scene;
+    this.spec = spec;
+    // A full bar is drawn once per colour; the fill level just shows part of it (crop)
+    this.fill = scene.add.image(this.holeX, this.holeY, '__DEFAULT').setOrigin(0).setVisible(false);
     this.objects = [...this.frameParts, this.fill];
   }
 
   /** Fill 0–1 of the hole with a colour (with a glossy band on top, like the frame) */
   setFill(frac: number, color: number) {
-    const g = this.fill;
-    g.clear();
     const f = Math.max(0, Math.min(1, frac));
-    if (f <= 0) return;
-    const right = this.holeX + this.holeW * f;
-    g.fillStyle(color, 1).fillPoints(this.shape(this.holeY, this.holeH, right), true);
-    // Shine on the upper part, darker edge at the bottom
-    g.fillStyle(0xffffff, 0.28).fillPoints(this.shape(this.holeY + this.holeH * 0.12, this.holeH * 0.3, right, 0.85), true);
-    g.fillStyle(0x000000, 0.14).fillPoints(this.shape(this.holeY + this.holeH * 0.72, this.holeH * 0.28, right), true);
+    const w = this.holeW * f;
+    if (w <= 0) {
+      this.fill.setVisible(false);
+      return;
+    }
+    // The fill picture is cut at the fill level: exactly the hole's shape left of `right`
+    const key = `bar:${this.spec.key}:${this.holeW.toFixed(2)}x${this.holeH.toFixed(2)}:${color}`;
+    bake(this.scene, key, this.holeW + 1, this.holeH + 1, (g) => {
+      const right = this.holeX + this.holeW;
+      const at = (pts: Phaser.Math.Vector2[]) => pts.map((p) => p.set(p.x - this.holeX, p.y - this.holeY));
+      g.fillStyle(color, 1).fillPoints(at(this.shape(this.holeY, this.holeH, right)), true);
+      // Shine on the upper part, darker edge at the bottom
+      g.fillStyle(0xffffff, 0.28).fillPoints(at(this.shape(this.holeY + this.holeH * 0.12, this.holeH * 0.3, right, 0.85)), true);
+      g.fillStyle(0x000000, 0.14).fillPoints(at(this.shape(this.holeY + this.holeH * 0.72, this.holeH * 0.28, right)), true);
+    });
+    if (this.fill.texture.key !== key) this.fill.setTexture(key);
+    this.fill.setCrop(0, 0, w, this.holeH + 1).setVisible(true);
   }
 
   /**

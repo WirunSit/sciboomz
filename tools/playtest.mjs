@@ -106,7 +106,7 @@ await shot('9-settings');
 await page.mouse.click(830, 320);
 await wait(200);
 assert.equal(await battle(() => localStorage.getItem('sciboom.aim')), 'drag', 'slingshot chosen in the settings');
-await page.mouse.click(640, 570);
+await page.mouse.click(640, 610); // "ปิด"
 await wait(300);
 assert.equal(await battle(() => window.game.scene.getScene('Battle').controls.aimButtons[0].visible), false, 'aim buttons hidden');
 

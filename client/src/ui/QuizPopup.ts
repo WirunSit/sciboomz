@@ -2,6 +2,7 @@ import * as Phaser from 'phaser';
 import type { QuizItem } from '@sciboom/shared';
 import { sfx } from '../audio/Sound';
 import { DEPTH, FONT_FAMILY, GAME_HEIGHT, GAME_WIDTH, TEXT_STROKE } from '../config';
+import { bake } from './bake';
 import { wrapThai } from './thaiWrap';
 
 export interface QuizResult {
@@ -87,13 +88,17 @@ export function showQuiz(scene: Phaser.Scene, item: QuizItem, opts: { title: str
   const buttons = item.choices.map((choice, i) => {
     const bx = cx + (i % 2 === 0 ? -1 : 1) * (btnW / 2 + 12);
     const by = gridTop + Math.floor(i / 2) * (btnH + 18) + btnH / 2;
-    const g = scene.add.graphics();
+    // Each colour drawn once into a picture (cheaper on phones than shapes redrawn every frame)
+    const P = 2;
+    const g = scene.add.image(-btnW / 2 - P, -btnH / 2 - P, '__DEFAULT').setOrigin(0);
     const draw = (color: number) => {
-      g.clear();
-      g.fillStyle(0x000000, 0.25).fillRoundedRect(-btnW / 2 + 3, -btnH / 2 + 5, btnW, btnH, 18);
-      g.fillStyle(color, 1).fillRoundedRect(-btnW / 2, -btnH / 2, btnW, btnH, 18);
-      g.lineStyle(4, 0x1b1d3a, 1).strokeRoundedRect(-btnW / 2, -btnH / 2, btnW, btnH, 18);
-      g.fillStyle(0xffffff, 0.9).fillCircle(-btnW / 2 + 38, 0, 24);
+      const key = bake(scene, `quiz-choice:${btnW}x${btnH}:${color}`, btnW + 3 + 2 * P, btnH + 5 + 2 * P, (b) => {
+        b.fillStyle(0x000000, 0.25).fillRoundedRect(P + 3, P + 5, btnW, btnH, 18);
+        b.fillStyle(color, 1).fillRoundedRect(P, P, btnW, btnH, 18);
+        b.lineStyle(4, 0x1b1d3a, 1).strokeRoundedRect(P, P, btnW, btnH, 18);
+        b.fillStyle(0xffffff, 0.9).fillCircle(P + 38, P + btnH / 2, 24);
+      });
+      g.setTexture(key);
     };
     draw(COLORS.normal);
     const letter = scene.add
