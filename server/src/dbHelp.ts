@@ -11,8 +11,11 @@ export function explainDbError(err: unknown, url: string | undefined): string {
     lines.push('สาเหตุ: DATABASE_URL ยังมีคำว่า [YOUR-PASSWORD] อยู่ ต้องแทนที่ด้วยรหัสผ่านจริง (ลบวงเล็บเหลี่ยมด้วย)');
   } else if (code === '28P01' || /password authentication failed/i.test(msg)) {
     lines.push('สาเหตุ: รหัสผ่านใน DATABASE_URL ผิด (ถ้าเพิ่งรีเซ็ตรหัสใน Supabase ต้องแก้ DATABASE_URL ใน Render ด้วย)');
-  } else if (/tenant or user not found/i.test(msg)) {
-    lines.push('สาเหตุ: ชื่อผู้ใช้ใน DATABASE_URL ผิด ต้องเป็นแบบ postgres.รหัสโปรเจค (คัดลอกจาก Supabase > Connect > Session pooler ใหม่)');
+  } else if (/tenant or user not found|tenant\/user \S+ not found/i.test(msg)) {
+    // Supabase can't find the project named in the user name (postgres.<project>)
+    lines.push('สาเหตุ: Supabase หาโปรเจคใน DATABASE_URL ไม่เจอ เป็นได้ 2 แบบ:');
+    lines.push('  1) โปรเจคถูกพัก (Paused) เพราะไม่มีคนใช้ 7 วัน: เข้า supabase.com > เลือกโปรเจค > กด Restore รอ 2-3 นาที แล้วกด Manual Deploy ใน Render');
+    lines.push('  2) โปรเจคถูกลบ หรือชื่อผู้ใช้ผิด (ต้องเป็น postgres.รหัสโปรเจค): คัดลอกจาก Supabase > Connect > Session pooler ใหม่ แล้วแก้ DATABASE_URL');
   } else if (code === 'ENOTFOUND' || code === 'EAI_AGAIN') {
     lines.push('สาเหตุ: ชื่อเซิร์ฟเวอร์ใน DATABASE_URL ผิด หรือพิมพ์ตกหล่น (คัดลอกจาก Supabase ใหม่ทั้งบรรทัด)');
   } else if (code === 'ECONNREFUSED' || code === 'ETIMEDOUT' || code === 'ENETUNREACH') {

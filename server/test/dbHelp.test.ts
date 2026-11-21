@@ -19,5 +19,9 @@ test('the copied-but-not-filled-in connection string is spotted', () => {
 
 test('a wrong user name and an unreachable host get their own hints', () => {
   assert.match(explainDbError(new Error('Tenant or user not found'), URL), /ชื่อผู้ใช้/);
+  // Newer Supabase wording (with a misleading ENOTFOUND inside): a paused or missing project
+  const paused = explainDbError(Object.assign(new Error('(ENOTFOUND) tenant/user postgres.abc not found'), { code: 'XX000' }), URL);
+  assert.match(paused, /Restore/);
+  assert.doesNotMatch(paused, /ชื่อเซิร์ฟเวอร์/);
   assert.match(explainDbError(Object.assign(new Error('getaddrinfo ENOTFOUND x'), { code: 'ENOTFOUND' }), URL), /ชื่อเซิร์ฟเวอร์/);
 });
