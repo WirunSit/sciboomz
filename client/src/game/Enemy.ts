@@ -177,6 +177,16 @@ export class Enemy implements Combatant {
     this.scene.tweens.add({ targets: this.nameTag, alpha: 0, duration: 600 });
   }
 
+  knockOut(dir: 1 | -1) {
+    this.scene.tweens.killTweensOf(this.root);
+    this.root.setAlpha(1).setAngle(0);
+    // Big monsters get knocked back less far
+    const push = Math.max(40, 160 - this.config.height / 3);
+    this.scene.tweens.add({ targets: this.root, x: this.x + dir * push, y: this.y - push * 0.8, angle: dir * 30, duration: 420, ease: 'Cubic.out' });
+    this.scene.tweens.add({ targets: this.root, y: this.y + 60, angle: dir * 100, alpha: 0, delay: 420, duration: 900, ease: 'Quad.in' });
+    this.scene.tweens.add({ targets: this.body, alpha: 0.3, duration: 80, yoyo: true, repeat: 5 });
+  }
+
   celebrate() {
     this.stopCharge();
     this.scene.tweens.add({ targets: this.root, y: this.y - 30, duration: 300, yoyo: true, repeat: -1, ease: 'Quad.out' });

@@ -56,6 +56,7 @@ import { drawArtBackground } from '../game/background';
 import type { Combatant } from '../game/Combatant';
 import type { Fighter } from '../game/Fighter';
 import { TerrainView } from '../game/TerrainView';
+import { Trail, blastStyle, debris, weaponBlast } from '../game/effects';
 import { Controls } from '../ui/Controls';
 import { Hud } from '../ui/Hud';
 import { SkillBar, type SlotState } from '../ui/SkillBar';
@@ -90,6 +91,17 @@ const ZOOM_MARGIN_X = 110;
 const HUD_TOP = 130;
 /** A camouflaged fighter, as seen by its own player (the other side sees nothing at all) */
 const STEALTH_SELF_ALPHA = 0.22;
+/** Finishing blow: how slow the game runs, for how long (real seconds), and how close the camera goes */
+const FINISH_SLOWMO = 0.3;
+const FINISH_SECONDS = 1.9;
+const FINISH_ZOOM = 1.25;
+/** A hit this far from the shooter counts as a long shot */
+const LONG_SHOT = 1100;
+/** One explosion this strong gets an award */
+const BIG_HIT = 400;
+
+/** Good shots that get an award ribbon (also counted for achievements) */
+export type AwardKind = 'long' | 'multi' | 'big' | 'sky' | 'self' | 'combo' | 'ko' | 'fall';
 
 /** Why a skill button did nothing */
 const BLOCKER_TEXT: Record<SkillBlocker, string> = {
@@ -204,6 +216,13 @@ export abstract class ArenaScene extends Phaser.Scene {
   private chargeDir = 1;
   /** Bumped when the scene shuts down so an old match loop stops */
   protected matchToken = 0;
+  /** Smoke/glow behind shells in flight */
+  private trail!: Trail;
+  private trailTick = 0;
+  /** Finishing blow in progress: slow motion and the camera close on the loser */
+  private finisher: { target: Combatant; left: number } | null = null;
+  /** Run once the finishing blow has played out (the result panel waits for it) */
+  private afterFinish: (() => void) | null = null;
 
   protected get terrain(): Terrain {
     return this.terrainView.terrain;
@@ -240,6 +259,11 @@ export abstract class ArenaScene extends Phaser.Scene {
       .setDepth(DEPTH.fx)
       .setVisible(false);
     this.guide = this.add.graphics().setDepth(DEPTH.projectile);
+    this.trail = new Trail(this);
+    this.finisher = null;
+    this.afterFinish = null;
+    this.time.timeScale = 1;
+    this.tweens.timeScale = 1;
     this.setupCameras();
     this.setupCameraDrag();
     return terrain;
@@ -366,7 +390,9 @@ export abstract class ArenaScene extends Phaser.Scene {
     stopMusic();
     stopAmbience();
     this.combatants.forEach((c) => c.setActive(false));
-    this.onMatchEnd(winner);
+    // Let the finishing blow play out before the result panel covers it
+    if (this.finisher) this.afterFinish = () => this.onMatchEnd(winner);
+    else this.onMatchEnd(winner);
   }
 
   /** Play one turn for `actor` (player input, AI, quiz…) */
@@ -596,8 +622,28 @@ export abstract class ArenaScene extends Phaser.Scene {
       }
       outcomes.push(await this.shoot(f, power, { ...opts, mode: loadout.mode, damageMul: (opts.damageMul ?? 1) * loadout.damageMul }));
     }
+    this.comboAward(f, outcomes);
     return outcomes;
   }
+
+  /** Several rounds or shells in one turn: show what they added up to */
+  protected comboAward(shooter: Combatant, outcomes: ShotOutcome[]) {
+    const hits = outcomes.flatMap((o) => o.hits).filter((h) => h.target !== shooter && h.damage > 0);
+    if (hits.length < 2) return;
+    const total = hits.reduce((a, h) => a + h.damage, 0);
+    this.giveAward(shooter, 'combo', `โดน ${hits.length} ลูก · รวม ${total}`);
+  }
+
+  /** Show an award ribbon for a good shot by a player (computer enemies don't get them) */
+  protected giveAward(shooter: Combatant, kind: AwardKind, text: string, color?: string) {
+    if (!('look' in shooter)) return;
+    sfx.award();
+    this.hud.award(text, color);
+    this.onAward(shooter, kind);
+  }
+
+  /** Hook: a player earned an award (stages count them for achievements) */
+  protected onAward(_shooter: Combatant, _kind: AwardKind) {}
 
   // ---- Shooting -------------------------------------------------------------
 
@@ -664,6 +710,7 @@ export abstract class ArenaScene extends Phaser.Scene {
     const pb = this.playback!;
     pb.elapsed += dt;
     const step = Math.floor(pb.elapsed / STEP);
+    this.trailTick -= dt;
     let lead: Phaser.GameObjects.Image | null = null;
     pb.timeline.flights.forEach((fl, i) => {
       const sprite = pb.sprites[i];
@@ -681,9 +728,14 @@ export abstract class ArenaScene extends Phaser.Scene {
       const prev = fl.path[Math.max(0, k - 1)];
       sprite.setVisible(true).setPosition(p.x, p.y);
       if (p.x !== prev.x || p.y !== prev.y) sprite.rotation = Math.atan2(p.y - prev.y, p.x - prev.x);
+      if (this.trailTick <= 0) {
+        const key = fl.look === 'plane' ? 'plane' : fl.look === 'bolt' ? 'proj_lightning' : pb.projectile;
+        this.trail.add(p.x, p.y, blastStyle(key).trail, 6 * fl.size + 2);
+      }
       lead ??= sprite;
     });
     const events = pb.timeline.events;
+    if (this.trailTick <= 0) this.trailTick = 0.03;
     while (pb.next < events.length && events[pb.next].t <= step) this.showEvent(pb, events[pb.next++]);
 
     // Camera and sky marker follow the first projectile still in the air
@@ -691,7 +743,7 @@ export abstract class ArenaScene extends Phaser.Scene {
     if (!live) this.skyMarker.setVisible(false);
     // The air rushing past gets louder and higher the faster the shell goes
     if (live) {
-      if (this.flightPrev) this.flightSound?.set(Math.hypot(live.x - this.flightPrev.x, live.y - this.flightPrev.y) / (dt * 1400));
+      if (this.flightPrev && dt > 0) this.flightSound?.set(Math.hypot(live.x - this.flightPrev.x, live.y - this.flightPrev.y) / (dt * 1400));
       this.flightPrev = { x: live.x, y: live.y };
     } else {
       this.flightSound?.stop();
@@ -724,7 +776,7 @@ export abstract class ArenaScene extends Phaser.Scene {
     switch (e.kind) {
       case 'explode':
         pb.outcome.impact ??= e.at;
-        this.showExplosion(e.at, e.radius, e.hits, pb);
+        this.showExplosion(e.at, e.radius, e.hits, pb, pb.timeline.flights[e.flight]);
         break;
       case 'teleport':
         (this.byId(e.id) as Fighter).teleportTo(e.x, e.y);
@@ -745,24 +797,32 @@ export abstract class ArenaScene extends Phaser.Scene {
     }
   }
 
-  private showExplosion(at: Vec, radius: number, hits: Hit[], pb: Playback) {
+  private showExplosion(at: Vec, radius: number, hits: Hit[], pb: Playback, flight?: ShotTimeline['flights'][number]) {
     const boom = this.add.sprite(at.x, at.y, 'fx/explosion_0').setDepth(DEPTH.fx);
     boom.setScale((radius * 2.8) / 256);
     boom.play('explosion');
+    const big = (flight?.size ?? 1) > 1.2;
+    const look = flight?.look === 'plane' ? 'plane' : flight?.look === 'bolt' ? 'proj_lightning' : pb.projectile;
+    weaponBlast(this, at.x, at.y, radius, blastStyle(look), big);
+    debris(this, at.x, at.y, radius, this.terrainView.groundColors(at.x, at.y, radius));
     const pan = this.panAt(at.x);
     sfx.explode(radius, pan);
     const others = hits.filter((h) => h.id !== pb.shooter.id);
     if (others.length > 0) sfx.hit(others.some((h) => h.direct), pan);
-    this.cameras.main.shake(220, 0.008);
+    this.cameras.main.shake(big ? 380 : 220, big ? 0.014 : 0.008);
     this.terrainView.carve(at.x, at.y, radius);
     this.hud.drawMinimap(this.terrain);
 
+    const shooter = pb.shooter;
+    const enemiesHit = hits.filter((h) => h.id !== shooter.id && h.damage > 0 && this.byId(h.id)?.alive);
+    let knockedOut: Combatant | null = null;
     for (const h of hits) {
       const c = this.byId(h.id);
       if (!c || !c.alive) continue;
       c.takeDamage(h.damage);
+      if (!c.alive && c !== shooter) knockedOut = c;
       pb.outcome.hits.push({ target: c, damage: h.damage });
-      this.floatText(c.x, c.y - c.height - 30, `-${h.damage}`, h.direct ? '#ffdd33' : '#ff5544');
+      this.floatText(c.x, c.y - c.height - 30, `-${h.damage}`, h.direct ? '#ffdd33' : '#ff5544', h.direct || h.damage >= BIG_HIT);
       if (c !== pb.shooter) {
         // Once per turn each, however many shells land
         if (!this.gaugeHitGiven) this.addGauge(pb.shooter, GAUGE_HIT);
@@ -784,9 +844,47 @@ export abstract class ArenaScene extends Phaser.Scene {
       if (h.pushTo !== undefined) this.tweens.add({ targets: c, x: h.pushTo, duration: 350, ease: 'Cubic.out', onUpdate: () => c.sync() });
       this.onHit(c, h);
     }
-    if (hits.some((h) => h.direct)) this.hud.banner('โดนเต็ม ๆ!', '#ffdd33');
     this.hud.refreshHp();
+
+    // The last blow of the match: slow motion, the camera closes in, K.O.!
+    if (knockedOut && this.matchResult() !== undefined) this.startFinisher(knockedOut, at.x, shooter);
+    else if (hits.some((h) => h.direct)) this.hud.banner('โดนเต็ม ๆ!', '#ffdd33');
+    else if (knockedOut) this.hud.banner(`${knockedOut.name} หมดแรง!`, '#ff8866');
+
+    // Award ribbons (Boom Z style)
+    if (enemiesHit.length > 0) {
+      const highest = Math.min(...(flight?.path ?? [at]).map((p) => p.y));
+      if (Math.abs(at.x - shooter.x) >= LONG_SHOT) this.giveAward(shooter, 'long', 'ยิงไกล!');
+      if (highest < -150) this.giveAward(shooter, 'sky', 'ยิงทะลุฟ้า!', '#bfe8ff');
+      if (enemiesHit.length >= 2) this.giveAward(shooter, 'multi', `ยิงทีเดียว ${enemiesHit.length} ตัว!`);
+      if (enemiesHit.some((h) => h.damage >= BIG_HIT)) this.giveAward(shooter, 'big', 'แรงสุด ๆ!', '#ffd0a0');
+    } else if (hits.some((h) => h.id === shooter.id && h.damage > 0)) {
+      this.giveAward(shooter, 'self', 'โดนตัวเอง!', '#dddddd');
+    }
     this.onExplosion(at, radius, pb.shooter);
+  }
+
+  /** Finishing blow on `target`, hit by a blast at x */
+  private startFinisher(target: Combatant, blastX: number, shooter: Combatant) {
+    this.finisher = { target, left: FINISH_SECONDS };
+    this.time.timeScale = FINISH_SLOWMO;
+    this.tweens.timeScale = FINISH_SLOWMO;
+    this.camTarget = target;
+    target.knockOut(target.x >= blastX ? 1 : -1);
+    this.hud.knockout();
+    sfx.knockout();
+    this.cameras.main.flash(180, 255, 255, 255);
+    this.giveAward(shooter, 'ko', 'ปิดเกม!', '#ffdd33');
+  }
+
+  /** Back to normal speed; the result panel (if waiting) shows now */
+  private endFinisher() {
+    this.finisher = null;
+    this.time.timeScale = 1;
+    this.tweens.timeScale = 1;
+    const next = this.afterFinish;
+    this.afterFinish = null;
+    next?.();
   }
 
   /**
@@ -837,6 +935,12 @@ export abstract class ArenaScene extends Phaser.Scene {
     this.syncShield(c);
   }
 
+  /** Someone fell off the map: whoever's turn it was gets the credit */
+  protected onFellOff(c: Combatant) {
+    const by = this.turnActor;
+    if (by && by !== c) this.giveAward(by, 'fall', `ส่ง ${c.name} ลงเหว!`, '#ffb0a0');
+  }
+
   /** Hook: a hit is shown on screen */
   protected onHit(_target: Combatant, _hit: Hit) {}
 
@@ -869,11 +973,11 @@ export abstract class ArenaScene extends Phaser.Scene {
     this.camTarget = c;
   }
 
-  protected floatText(x: number, y: number, text: string, color: string) {
+  protected floatText(x: number, y: number, text: string, color: string, big = false) {
     const t = this.add
       .text(x, y, text, {
         fontFamily: FONT_FAMILY,
-        fontSize: '40px',
+        fontSize: big ? '56px' : '40px',
         fontStyle: '700',
         color,
         stroke: TEXT_STROKE,
@@ -882,7 +986,12 @@ export abstract class ArenaScene extends Phaser.Scene {
       })
       .setOrigin(0.5)
       .setDepth(DEPTH.overlay);
-    this.tweens.add({ targets: t, y: y - 70, alpha: 0, duration: 1300, ease: 'Cubic.out', onComplete: () => t.destroy() });
+    if (big) {
+      // Pops in big, then floats away
+      t.setScale(1.8);
+      this.tweens.add({ targets: t, scale: 1, duration: 220, ease: 'Back.out' });
+    }
+    this.tweens.add({ targets: t, y: y - 70, alpha: 0, duration: 1300, delay: big ? 200 : 0, ease: 'Cubic.out', onComplete: () => t.destroy() });
   }
 
   /** Dimmed end-of-match panel with a title, a few lines and buttons */
@@ -944,13 +1053,21 @@ export abstract class ArenaScene extends Phaser.Scene {
     if (!this.terrainView) return;
     // Switching browser tabs pauses/resumes the game loop; never trust a weird frame time
     if (!Number.isFinite(deltaMs) || deltaMs < 0) return;
-    const dt = Math.min(deltaMs, 50) / 1000;
+    const realDt = Math.min(deltaMs, 50) / 1000;
+    // Slow motion during the finishing blow
+    const dt = realDt * this.time.timeScale;
+    if (this.finisher) {
+      this.finisher.left -= realDt;
+      if (this.finisher.left <= 0) this.endFinisher();
+    }
+    this.trail.draw(dt);
 
     for (const c of this.combatants) {
       if (c.settle(this.terrain, dt)) {
         c.die();
         this.hud.refreshHp();
         this.hud.banner(`${c.name} ตกเหว!`, '#ff8866');
+        this.onFellOff(c);
         if (c === this.human) this.finishHuman(null);
       }
     }
@@ -969,14 +1086,15 @@ export abstract class ArenaScene extends Phaser.Scene {
     const cam = this.cameras.main;
     const fit = this.fitGuide();
     // While charging the guide grows and shrinks with the power: only ever zoom further out then, never back in
-    if (fit) this.zoomGoal = this.phase === 'charging' ? Math.min(this.zoomGoal, fit.zoom) : fit.zoom;
+    if (this.finisher) this.zoomGoal = FINISH_ZOOM;
+    else if (fit) this.zoomGoal = this.phase === 'charging' ? Math.min(this.zoomGoal, fit.zoom) : fit.zoom;
     else if (this.phase !== 'flying') this.zoomGoal = 1; // a shot keeps the zoom it was fired with
-    cam.setZoom(cam.zoom + (this.zoomGoal - cam.zoom) * Math.min(1, dt * 3));
+    cam.setZoom(cam.zoom + (this.zoomGoal - cam.zoom) * Math.min(1, realDt * (this.finisher ? 6 : 3)));
     if (Math.abs(cam.zoom - this.zoomGoal) < 0.002) cam.setZoom(this.zoomGoal);
     // The ground stays at the bottom of the screen; zooming out shows more sky
     cam.scrollY = WORLD_HEIGHT - GAME_HEIGHT / 2 - GAME_HEIGHT / (2 * cam.zoom);
     const centre = fit && !this.panning && this.camTarget === this.human ? fit.x : this.camTarget?.x;
-    if (centre !== undefined) cam.scrollX += (centre - GAME_WIDTH / 2 - cam.scrollX) * Math.min(1, dt * 5);
+    if (centre !== undefined) cam.scrollX += (centre - GAME_WIDTH / 2 - cam.scrollX) * Math.min(1, realDt * 5);
     // The background art moves (and never zooms) with the middle of the view
     this.bgCam.scrollX = Phaser.Math.Clamp(cam.scrollX, 0, WORLD_WIDTH - GAME_WIDTH);
     const flying = this.playback?.sprites.find((s) => s.active && s.visible) ?? null;

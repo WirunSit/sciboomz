@@ -277,6 +277,26 @@ export const sfx = {
     bell(NOTE(93), t + 0.07, 0.5, { vol: 0.1, ratio: 4, index: 1.5, send: 0.3 });
   },
 
+  /** A shot award ribbon ("ยิงไกล!", "ยิงทีเดียว 2 ตัว!") */
+  award() {
+    const c = ready();
+    if (!c || recorded('award', 0.7)) return;
+    const t = c.currentTime;
+    bell(NOTE(84), t, 0.3, { vol: 0.08, ratio: 3, send: 0.3 });
+    bell(NOTE(88), t + 0.07, 0.3, { vol: 0.08, ratio: 3, send: 0.3 });
+    bell(NOTE(91), t + 0.14, 0.5, { vol: 0.09, ratio: 3, send: 0.4 });
+  },
+  /** The finishing blow: a heavy slam, a whoosh and a crowd-like roar of noise */
+  knockout() {
+    const c = ready();
+    if (!c || recorded('knockout', 1)) return;
+    const t = c.currentTime;
+    tone(70, t, 0.9, { type: 'sine', vol: 0.6, slideTo: 30, attack: 0.002 });
+    noise(t, 0.12, { from: 7000, to: 1500, type: 'highpass', vol: 0.3 });
+    noise(t + 0.05, 1.4, { from: 400, to: 3000, type: 'bandpass', q: 0.8, vol: 0.12, attack: 0.3, send: 0.5 });
+    [60, 67, 72].forEach((n) => tone(NOTE(n), t + 0.1, 1.1, { type: 'sawtooth', vol: 0.045, cutoff: 1800, attack: 0.02, send: 0.4 }));
+  },
+
   // ---- End of a match (the music stops for these) ------------------------------------------
   win() {
     const c = ready();

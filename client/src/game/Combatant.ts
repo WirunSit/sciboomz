@@ -34,6 +34,8 @@ export interface Combatant {
   takeDamage(amount: number): void;
   die(): void;
   celebrate(): void;
+  /** Finishing blow: thrown through the air (call after it has died) */
+  knockOut(dir: 1 | -1): void;
   /** Move sprites to match the current state */
   sync(): void;
 }

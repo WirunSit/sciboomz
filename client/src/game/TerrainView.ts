@@ -115,6 +115,21 @@ export class TerrainView {
     this.texture.refresh();
   }
 
+  /** Colours of the ground inside a circle (for the dirt thrown out of a crater); empty if there's none */
+  groundColors(cx: number, cy: number, radius: number, count = 6): number[] {
+    const out: number[] = [];
+    for (let i = 0; i < count * 3 && out.length < count; i++) {
+      const a = (i / count) * Math.PI * 2;
+      const r = radius * (0.3 + 0.6 * ((i * 7) % 5) / 5);
+      const x = Math.round(cx + Math.cos(a) * r);
+      const y = Math.round(cy + Math.sin(a) * r);
+      if (!this.terrain.isSolid(x, y)) continue;
+      const [red, green, blue] = this.ctx.getImageData(x, y, 1, 1).data;
+      out.push((red << 16) | (green << 8) | blue);
+    }
+    return out;
+  }
+
   /** Blow a crater in both the data and the picture, with a scorched rim */
   carve(cx: number, cy: number, radius: number) {
     this.terrain.carve(cx, cy, radius);

@@ -11,7 +11,7 @@ const KNOWN = [
   'click', 'pick', 'deny', 'fire', 'plane', 'explode', 'hit', 'hit_direct', 'turn', 'tick', 'step',
   'heal', 'shield', 'stealth', 'teleport', 'burn', 'ultimate', 'boss_charge',
   'lava', 'roots', 'swell', 'thunder', 'quiz', 'correct', 'wrong', 'crate', 'item', 'coin',
-  'win', 'lose', 'levelup',
+  'win', 'lose', 'levelup', 'award', 'knockout',
   'music_menu', 'music_map', 'music_battle', 'music_boss', 'music_pvp',
   'amb_lab', 'amb_cell', 'amb_forest', 'amb_lava', 'amb_storm', 'amb_arena',
 ];

@@ -197,6 +197,33 @@ export class Fighter implements Combatant {
     this.scene.tweens.add({ targets: [this.root, this.nameTag], alpha: 0.45, duration: 600 });
   }
 
+  knockOut(dir: 1 | -1) {
+    const targets = [this.root, this.nameTag];
+    this.scene.tweens.killTweensOf(targets);
+    this.root.setAlpha(1);
+    const x0 = this.root.x;
+    const y0 = this.root.y;
+    // Up and away in an arc, spinning, then flat on the ground
+    const arc = { t: 0 };
+    this.scene.tweens.add({
+      targets: arc,
+      t: 1,
+      duration: 900,
+      ease: 'Linear',
+      onUpdate: () => {
+        const t = arc.t;
+        this.root.setPosition(x0 + dir * 110 * t, y0 - 150 * 4 * t * (1 - t));
+        this.root.angle = dir * 450 * t;
+        this.nameTag.setPosition(this.root.x, this.root.y - BODY_HEIGHT - 10);
+      },
+      onComplete: () => {
+        this.root.angle = dir * 90;
+        this.root.y = y0 - 20;
+        this.scene.tweens.add({ targets, alpha: 0.5, duration: 500 });
+      },
+    });
+  }
+
   celebrate() {
     this.showPose('win', false);
     this.marker.setVisible(false);

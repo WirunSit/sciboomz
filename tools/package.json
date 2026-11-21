@@ -12,6 +12,7 @@
     "playtest:skills": "node playtest-skills.mjs",
     "playtest:online": "node playtest-online.mjs",
     "playtest:accounts": "node playtest-accounts.mjs",
+    "playtest:feel": "node playtest-feel.mjs",
     "costumes": "node costumes.mjs"
   },
   "devDependencies": {

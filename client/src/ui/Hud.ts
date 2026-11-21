@@ -40,6 +40,8 @@ export class Hud {
   private statusItems: Phaser.GameObjects.GameObject[] = [];
   private lastBanner?: Phaser.GameObjects.Text;
   private countdownText?: Phaser.GameObjects.Text;
+  /** Shot award ribbons on screen now (new ones go underneath) */
+  private awards: Phaser.GameObjects.Container[] = [];
   /** Whether a fighter gets a dot on the mini-map (camouflage hides it from the other side) */
   showOnMap: (c: Combatant) => boolean = () => true;
 
@@ -57,6 +59,8 @@ export class Hud {
     // Wind
     this.windArrow = scene.add.image(GAME_WIDTH / 2, 100, 'ui/wind_arrow');
     this.windText = scene.add.text(GAME_WIDTH / 2, 100, '', textStyle(20)).setOrigin(0.5);
+    // Hidden until the first turn sets the wind (the art is huge before it's scaled)
+    this.setWind(0);
 
     // Mini-map
     this.mapScale = MINIMAP.w / worldWidth;
@@ -230,6 +234,40 @@ export class Hud {
     this.scene.tweens.add({ targets: t, alpha: 1, scale: 1, duration: 220, ease: 'Back.out' });
     this.scene.tweens.add({ targets: t, alpha: 0, y: t.y - 30, delay: 1000, duration: 400, onComplete: () => t.destroy() });
     this.lastBanner = t;
+  }
+
+  /**
+   * A gold ribbon for a good shot (like Boom Z's "ยิงไกล!"), pops up on the left under
+   * the player's panel; several stack up and fade one after another.
+   */
+  award(text: string, color = '#fff3b0') {
+    this.awards = this.awards.filter((a) => a.active);
+    const y = 186 + this.awards.length * 52;
+    const label = this.scene.add.text(0, 0, text, textStyle(28, color)).setOrigin(0.5);
+    const w = label.width + 70;
+    const ribbon = this.scene.add.graphics();
+    ribbon.fillStyle(0x1b1d3a, 0.55).fillRoundedRect(-w / 2 + 3, -22, w, 48, 22);
+    ribbon.fillStyle(0xc2410c, 0.95).fillRoundedRect(-w / 2, -25, w, 48, 22);
+    ribbon.fillStyle(0xffffff, 0.18).fillRoundedRect(-w / 2 + 6, -22, w - 12, 16, 8);
+    ribbon.lineStyle(3, 0xffd34d, 1).strokeRoundedRect(-w / 2, -25, w, 48, 22);
+    const c = this.scene.add.container(24 + w / 2, y, [ribbon, label]).setScrollFactor(0).setDepth(DEPTH.overlay).setScale(0.3).setAlpha(0);
+    this.scene.tweens.add({ targets: c, scale: 1, alpha: 1, duration: 260, ease: 'Back.out' });
+    this.scene.tweens.add({ targets: c, alpha: 0, x: c.x - 60, delay: 1500 + this.awards.length * 250, duration: 350, onComplete: () => c.destroy() });
+    this.awards.push(c);
+  }
+
+  /** "K.O.!" slammed onto the middle of the screen for the finishing blow */
+  knockout() {
+    const t = this.scene.add
+      .text(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 40, 'K.O.!', { ...textStyle(150, '#ffdd33'), strokeThickness: 16 })
+      .setOrigin(0.5)
+      .setScrollFactor(0)
+      .setDepth(DEPTH.overlay)
+      .setScale(3)
+      .setAngle(-12)
+      .setAlpha(0);
+    this.scene.tweens.add({ targets: t, scale: 1, alpha: 1, angle: -6, duration: 260, ease: 'Back.out' });
+    this.scene.tweens.add({ targets: t, alpha: 0, scale: 1.2, delay: 1100, duration: 400, onComplete: () => t.destroy() });
   }
 
   /** Big number in the middle of the screen for the last seconds of a turn (5, 4, 3, 2, 1) */

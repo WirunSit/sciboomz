@@ -3,13 +3,15 @@
 // needed (handy for Cloud Shell's Web Preview). Ctrl+C stops both.
 import { spawn } from 'node:child_process';
 
+// The server always gets 8081 here, even if PORT is set (some launchers set PORT=8080,
+// and then the server would take the game's port and serve an old build instead)
 const parts = [
-  { name: 'server', color: 35, args: ['run', 'dev', '-w', 'server'] },
-  { name: 'game', color: 36, args: ['run', 'dev', '-w', 'client'] },
+  { name: 'server', color: 35, args: ['run', 'dev', '-w', 'server'], env: { PORT: '8081' } },
+  { name: 'game', color: 36, args: ['run', 'dev', '-w', 'client'], env: {} },
 ];
 
-const children = parts.map(({ name, color, args }) => {
-  const child = spawn('npm', args, { shell: true, stdio: ['ignore', 'pipe', 'pipe'] });
+const children = parts.map(({ name, color, args, env }) => {
+  const child = spawn('npm', args, { shell: true, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ...env } });
   const tag = `\x1b[${color}m[${name}]\x1b[0m `;
   for (const stream of [child.stdout, child.stderr]) {
     let rest = '';

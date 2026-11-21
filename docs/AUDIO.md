@@ -53,6 +53,7 @@
 | `quiz` / `correct` / `wrong` | เปิดคำถาม / ตอบถูก / ตอบผิด | ~1 วิ |
 | `crate` / `item` / `coin` | กล่องแตก / ได้ไอเท็ม / ได้เหรียญ | สั้น |
 | `win` / `lose` / `levelup` | ชนะ / แพ้ / เลเวลอัป | 2–3 วิ |
+| `award` / `knockout` | ป้ายรางวัลการยิง (เช่น "ยิงไกล!") / นัดปิดเกม K.O. | 0.5 / 1.5 วิ |
 | `music_menu` `music_map` `music_battle` `music_boss` `music_pvp` | เพลงวน | 1–2 นาที วนได้ |
 | `amb_lab` `amb_cell` `amb_forest` `amb_lava` `amb_storm` `amb_arena` | เสียงบรรยากาศวน | 30–60 วิ วนได้ |
 
