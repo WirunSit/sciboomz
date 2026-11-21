@@ -21,14 +21,15 @@
   เวลารันเซิร์ฟเวอร์ทดสอบ ให้ใช้พอร์ต 8080 และ bind ที่ 0.0.0.0
 
 ## สภาพแวดล้อมที่ 2: คอม Windows ของผู้ใช้
-- โฟลเดอร์โปรเจค `D:\sciboom` (clone ผ่าน HTTPS: https://github.com/WirunSit/my-game.git), Node.js 24
+- โฟลเดอร์โปรเจค `D:\sciboom` (clone ผ่าน HTTPS: https://github.com/WirunSit/sciboomz.git), Node.js 24
 - มีการ์ดจอจริง เกมใช้ WebGL ได้ / เทสต์อัตโนมัติยังเปิดเบราว์เซอร์ด้วย `--disable-gpu` เหมือนเดิม
 - คำแนะนำเรื่อง Cloud Shell (home, nvm, Web Preview) ไม่ต้องใช้บนเครื่องนี้ เปิด http://localhost:8080 ได้เลย
 
 ## Git และ GitHub
 - โฟลเดอร์โปรเจค: ~/my-game
 - branch หลัก: main
-- remote: origin = git@github.com:WirunSit/my-game.git (เชื่อมด้วย SSH key ที่ ~/.ssh/id_ed25519 ใช้งานได้แล้ว)
+- remote: origin = git@github.com:WirunSit/sciboomz.git (เชื่อมด้วย SSH key ที่ ~/.ssh/id_ed25519 ใช้งานได้แล้ว)
+- repo บน GitHub ชื่อ **sciboomz** (เปลี่ยนจาก my-game เมื่อ 2026-11; ลิงก์เก่ายังส่งต่อให้ แต่ควรใช้ชื่อใหม่) — โฟลเดอร์ใน Cloud Shell ยังชื่อ ~/my-game ได้ตามเดิม
 - repo บน GitHub ตอนนี้เป็น Public
 - สถานะปัจจุบัน: ดูที่ PROGRESS.md
 - ขั้นตอนบันทึกงาน: `git add .` → `git commit -m "ข้อความภาษาอังกฤษสั้น ๆ"` → `git push`

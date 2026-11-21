@@ -31,8 +31,8 @@
 ## ขั้นที่ 2 — นำเกมขึ้น Render (ประมาณ 10 นาที)
 
 1. ตรวจว่า push โค้ดล่าสุดขึ้น GitHub แล้ว (`git push`)
-2. เข้า https://render.com กด **Get Started** แล้วล็อกอินด้วย GitHub (อนุญาตให้ Render เห็น repo `my-game`)
-3. กด **New +** → **Blueprint** → เลือก repo **WirunSit/my-game** → กด **Connect**
+2. เข้า https://render.com กด **Get Started** แล้วล็อกอินด้วย GitHub (อนุญาตให้ Render เห็น repo `sciboomz` (ชื่อเดิม `my-game`))
+3. กด **New +** → **Blueprint** → เลือก repo **WirunSit/sciboomz** → กด **Connect**
 4. Render จะอ่าน `render.yaml` และถามค่า 2 ค่า:
    - **DATABASE_URL** = ข้อความจากขั้นที่ 1
    - **TEACHER_SIGNUP_CODE** = รหัสที่ครูต้องใส่ตอนสมัคร (ตั้งเองเช่น `sciboom-ร.ร.ของเรา-2569`) — กันคนนอกมาสมัครเป็นครู
